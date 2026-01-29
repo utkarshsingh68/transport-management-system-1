@@ -165,6 +165,7 @@ const Trips = () => {
   const totalIncome = trips.reduce((sum, t) => sum + (parseFloat(t.actual_income) || 0), 0);
   const totalAdvance = trips.reduce((sum, t) => sum + (parseFloat(t.driver_advance_amount) || 0), 0);
   const totalTripSpent = trips.reduce((sum, t) => sum + (parseFloat(t.trip_spent_amount) || 0), 0);
+  const totalDriverBalance = totalAdvance - totalTripSpent;
   const completedTrips = trips.filter(t => t.status === 'completed').length;
   const inProgressTrips = trips.filter(t => t.status === 'in_progress').length;
 
@@ -233,14 +234,25 @@ const Trips = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <p className="text-sm font-medium text-slate-500">Total Driver Advance (Trips)</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">₹{totalAdvance.toLocaleString('en-IN')}</p>
+          <p className="text-sm font-medium text-slate-500">Total Advance Given</p>
+          <p className="text-2xl font-bold text-blue-600 mt-1">₹{totalAdvance.toLocaleString('en-IN')}</p>
+          <p className="text-xs text-slate-400 mt-1">Money given to drivers</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <p className="text-sm font-medium text-slate-500">Total Trip Spend (Trips)</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">₹{totalTripSpent.toLocaleString('en-IN')}</p>
+          <p className="text-sm font-medium text-slate-500">Total Trip Spend</p>
+          <p className="text-2xl font-bold text-orange-600 mt-1">₹{totalTripSpent.toLocaleString('en-IN')}</p>
+          <p className="text-xs text-slate-400 mt-1">Spent by drivers on trips</p>
+        </div>
+        <div className={`rounded-2xl p-5 shadow-sm border ${totalDriverBalance >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+          <p className="text-sm font-medium text-slate-500">Driver Balance (To Return)</p>
+          <p className={`text-2xl font-bold mt-1 ${totalDriverBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+            ₹{Math.abs(totalDriverBalance).toLocaleString('en-IN')}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            {totalDriverBalance >= 0 ? 'Money to collect from drivers' : 'Money owed to drivers'}
+          </p>
         </div>
       </div>
 
@@ -280,10 +292,10 @@ const Trips = () => {
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Route</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Weight</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Income</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Advance</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spent</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Balance</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -307,7 +319,11 @@ const Trips = () => {
                   </td>
                 </tr>
               ) : (
-                filteredTrips.map((trip, idx) => (
+                filteredTrips.map((trip, idx) => {
+                  const advance = parseFloat(trip.driver_advance_amount) || 0;
+                  const spent = parseFloat(trip.trip_spent_amount) || 0;
+                  const balance = advance - spent;
+                  return (
                   <tr key={trip.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
                     <td className="px-6 py-4">
                       <span className="font-semibold text-slate-900">{trip.trip_number}</span>
@@ -331,10 +347,17 @@ const Trips = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-slate-600">{new Date(trip.start_date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-slate-600">{trip.weight_tons ? `${trip.weight_tons}T` : '-'}</td>
                     <td className="px-6 py-4 font-semibold text-green-600">₹{trip.actual_income?.toLocaleString('en-IN') || 0}</td>
-                    <td className="px-6 py-4 font-semibold text-slate-700">₹{(parseFloat(trip.driver_advance_amount) || 0).toLocaleString('en-IN')}</td>
-                    <td className="px-6 py-4 font-semibold text-slate-700">₹{(parseFloat(trip.trip_spent_amount) || 0).toLocaleString('en-IN')}</td>
+                    <td className="px-6 py-4 font-medium text-blue-600">₹{advance.toLocaleString('en-IN')}</td>
+                    <td className="px-6 py-4 font-medium text-orange-600">₹{spent.toLocaleString('en-IN')}</td>
+                    <td className="px-6 py-4">
+                      <span className={`font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {balance >= 0 ? '' : '-'}₹{Math.abs(balance).toLocaleString('en-IN')}
+                      </span>
+                      <p className="text-xs text-slate-400">
+                        {balance > 0 ? 'To return' : balance < 0 ? 'Overspent' : 'Settled'}
+                      </p>
+                    </td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full ring-1 ${
@@ -369,7 +392,7 @@ const Trips = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                );})
               )}
             </tbody>
           </table>
