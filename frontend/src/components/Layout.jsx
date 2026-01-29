@@ -15,7 +15,6 @@ import {
   Wallet,
   BookOpen,
   TrendingUp,
-  ChevronRight,
   Bell,
   Search,
   Sparkles,
@@ -66,7 +65,7 @@ const Layout = () => {
         {/* Logo */}
         <div className="flex items-center justify-between h-20 px-5 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 animate-pulse-slow">
+            <div className="w-12 h-12 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30">
               <Truck size={24} className="text-white" />
             </div>
             <div>
@@ -134,32 +133,6 @@ const Layout = () => {
           <button
             onClick={handleLogout}
             className="flex items-center gap-2 w-full px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200"
-          >
-            <LogOut size={18} />
-            <span>Sign out</span>
-          </button>
-        </div>
-      </aside>
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
-
-        {/* User section */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-800 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-              {user?.full_name?.charAt(0) || 'A'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800 truncate">{user?.full_name || 'Admin'}</p>
-              <p className="text-xs text-slate-500 capitalize">{user?.role || 'Administrator'}</p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
           >
             <LogOut size={18} />
             <span>Sign out</span>
