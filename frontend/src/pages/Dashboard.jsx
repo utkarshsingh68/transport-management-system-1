@@ -179,7 +179,7 @@ const Dashboard = () => {
     }
   };
 
-  const profitMargin = summary?.profit_margin || 0;
+  const profitMargin = Number(summary?.profit_margin) || 0;
 
   return (
     <div className="space-y-6">

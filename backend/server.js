@@ -32,8 +32,14 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(helmet());
 app.use(compression());
+
+// CORS configuration for production
+const corsOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+  : ['http://localhost:5173'];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: corsOrigins,
   credentials: true
 }));
 app.use(express.json());
