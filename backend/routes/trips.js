@@ -263,7 +263,7 @@ router.post('/',
 
       let result;
       if (hasPaymentColumns) {
-        // Insert with payment columns (skip consigner_id to avoid FK issues)
+        // Insert with payment columns
         result = await query(
           `INSERT INTO trips (
             trip_number, truck_id, driver_id, from_location, to_location,
@@ -271,8 +271,8 @@ router.post('/',
             rate_type, fixed_amount, calculated_income, actual_income,
             driver_advance_amount, trip_spent_amount,
             consignor_name, consignee_name, lr_number, status, notes, created_by,
-            freight_amount, amount_paid, amount_due, payment_status, payment_due_date
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+            freight_amount, amount_paid, amount_due, payment_status, payment_due_date, consigner_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
           RETURNING *`,
           [
             trip_number, truck_id, driver_id, from_location, to_location,
@@ -280,7 +280,7 @@ router.post('/',
             rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
             driverAdvanceAmountNum, tripSpentAmountNum,
             consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id,
-            freightAmountNum, amountPaid, amountDue, paymentStatus, payment_due_date || null
+            freightAmountNum, amountPaid, amountDue, paymentStatus, payment_due_date || null, finalConsignerId
           ]
         );
       } else {
