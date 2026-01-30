@@ -228,8 +228,15 @@ router.post('/',
         }
       }
 
+      // Check if payment columns exist
+      const checkColumns = await query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'trips' AND column_name IN ('freight_amount', 'consigner_id', 'payment_status')
+      `);
+      const hasPaymentColumns = checkColumns.rows.length >= 3;
+
       // Handle payment scenarios from req.body.payment_scenario
-      const paymentScenario = req.body.payment_scenario || 'not_paid'; // 'full_to_driver', 'left_with_party', 'partial_to_driver'
+      const paymentScenario = req.body.payment_scenario || 'not_paid';
       const amountPaidToDriver = toMoneyNumber(req.body.amount_paid_to_driver || 0);
       
       let paymentStatus = 'pending';
@@ -250,39 +257,69 @@ router.post('/',
         amountDue = freightAmountNum;
       }
 
-      const result = await query(
-        `INSERT INTO trips (
-          trip_number, truck_id, driver_id, from_location, to_location,
-          start_date, end_date, distance_km, weight_tons, rate_per_ton,
-          rate_type, fixed_amount, calculated_income, actual_income,
-          driver_advance_amount, trip_spent_amount,
-          consignor_name, consignee_name, lr_number, status, notes, created_by,
-          freight_amount, amount_paid, amount_due, payment_status, payment_due_date, consigner_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-        RETURNING *`,
-        [
-          trip_number, truck_id, driver_id, from_location, to_location,
-          start_date, end_date, distanceKmNum, weightTonsNum, ratePerTonNum,
-          rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
-          driverAdvanceAmountNum, tripSpentAmountNum,
-          consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id,
-          freightAmountNum, amountPaid, amountDue, paymentStatus, payment_due_date || null, finalConsignerId
-        ]
-      );
+      let result;
+      if (hasPaymentColumns) {
+        // Insert with payment columns
+        result = await query(
+          `INSERT INTO trips (
+            trip_number, truck_id, driver_id, from_location, to_location,
+            start_date, end_date, distance_km, weight_tons, rate_per_ton,
+            rate_type, fixed_amount, calculated_income, actual_income,
+            driver_advance_amount, trip_spent_amount,
+            consignor_name, consignee_name, lr_number, status, notes, created_by,
+            freight_amount, amount_paid, amount_due, payment_status, payment_due_date, consigner_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+          RETURNING *`,
+          [
+            trip_number, truck_id, driver_id, from_location, to_location,
+            start_date, end_date, distanceKmNum, weightTonsNum, ratePerTonNum,
+            rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
+            driverAdvanceAmountNum, tripSpentAmountNum,
+            consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id,
+            freightAmountNum, amountPaid, amountDue, paymentStatus, payment_due_date || null, finalConsignerId
+          ]
+        );
+      } else {
+        // Insert without payment columns (legacy mode)
+        result = await query(
+          `INSERT INTO trips (
+            trip_number, truck_id, driver_id, from_location, to_location,
+            start_date, end_date, distance_km, weight_tons, rate_per_ton,
+            rate_type, fixed_amount, calculated_income, actual_income,
+            driver_advance_amount, trip_spent_amount,
+            consignor_name, consignee_name, lr_number, status, notes, created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          RETURNING *`,
+          [
+            trip_number, truck_id, driver_id, from_location, to_location,
+            start_date, end_date, distanceKmNum, weightTonsNum, ratePerTonNum,
+            rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
+            driverAdvanceAmountNum, tripSpentAmountNum,
+            consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id
+          ]
+        );
+      }
 
       const createdTrip = result.rows[0];
       
-      // Record payment to driver if applicable
-      if (amountPaid > 0 && paymentScenario !== 'left_with_party') {
-        await query(
-          `INSERT INTO trip_payments (trip_id, amount, payment_date, payment_mode, notes, created_by)
-           VALUES ($1, $2, $3, 'cash', $4, $5)`,
-          [createdTrip.id, amountPaid, start_date, `Payment to driver: ${paymentScenario === 'full_to_driver' ? 'Full' : 'Partial'}`, req.user.id]
-        );
-      }
-      
-      // Update consigner ledger if freight amount and consigner are set
-      if (freightAmountNum > 0 && finalConsignerId) {
+      // Only process payment tracking if payment columns exist
+      if (hasPaymentColumns) {
+        // Record payment to driver if applicable
+        if (amountPaid > 0 && paymentScenario !== 'left_with_party') {
+          try {
+            await query(
+              `INSERT INTO trip_payments (trip_id, amount, payment_date, payment_mode, notes, created_by)
+               VALUES ($1, $2, $3, 'cash', $4, $5)`,
+              [createdTrip.id, amountPaid, start_date, `Payment to driver: ${paymentScenario === 'full_to_driver' ? 'Full' : 'Partial'}`, req.user.id]
+            );
+          } catch (err) {
+            console.log('trip_payments table not available:', err.message);
+          }
+        }
+        
+        // Update consigner ledger if freight amount and consigner are set
+        if (freightAmountNum > 0 && finalConsignerId) {
+          try {
         // Get current balance
         const balanceResult = await query(
           'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
@@ -334,6 +371,10 @@ router.post('/',
              last_updated = CURRENT_TIMESTAMP`,
           [finalConsignerId, amountDue, freightAmountNum, amountPaid, start_date]
         );
+          } catch (err) {
+            console.log('Ledger tables not available:', err.message);
+          }
+        }
       }
       
       await syncTripSpentExpense({

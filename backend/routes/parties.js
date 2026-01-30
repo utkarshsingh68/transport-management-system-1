@@ -15,19 +15,34 @@ router.get('/search', async (req, res, next) => {
       return res.json([]);
     }
 
-    const result = await query(`
-      SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
-        COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
-        COALESCE(cb.total_freight, 0) as total_freight,
-        COALESCE(cb.total_paid, 0) as total_paid
-      FROM transporters p
-      LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
-      WHERE LOWER(p.name) LIKE LOWER($1)
-      ORDER BY p.name
-      LIMIT 10
-    `, [`%${name}%`]);
+    // Try with consigner_balance join, fallback to simple query
+    try {
+      const result = await query(`
+        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+          COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
+          COALESCE(cb.total_freight, 0) as total_freight,
+          COALESCE(cb.total_paid, 0) as total_paid
+        FROM transporters p
+        LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
+        WHERE LOWER(p.name) LIKE LOWER($1)
+        ORDER BY p.name
+        LIMIT 10
+      `, [`%${name}%`]);
 
-    res.json(result.rows);
+      res.json(result.rows);
+    } catch (err) {
+      // Fallback if consigner_balance doesn't exist
+      const result = await query(`
+        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+          0 as outstanding_balance, 0 as total_freight, 0 as total_paid
+        FROM transporters p
+        WHERE LOWER(p.name) LIKE LOWER($1)
+        ORDER BY p.name
+        LIMIT 10
+      `, [`%${name}%`]);
+
+      res.json(result.rows);
+    }
   } catch (error) {
     next(error);
   }
@@ -36,22 +51,40 @@ router.get('/search', async (req, res, next) => {
 // Get consigner by exact name with balance
 router.get('/by-name/:name', async (req, res, next) => {
   try {
-    const result = await query(`
-      SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
-        COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
-        COALESCE(cb.total_freight, 0) as total_freight,
-        COALESCE(cb.total_paid, 0) as total_paid
-      FROM transporters p
-      LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
-      WHERE LOWER(p.name) = LOWER($1)
-      LIMIT 1
-    `, [req.params.name]);
+    // Try with consigner_balance join, fallback to simple query
+    try {
+      const result = await query(`
+        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+          COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
+          COALESCE(cb.total_freight, 0) as total_freight,
+          COALESCE(cb.total_paid, 0) as total_paid
+        FROM transporters p
+        LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
+        WHERE LOWER(p.name) = LOWER($1)
+        LIMIT 1
+      `, [req.params.name]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Consigner not found' });
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Consigner not found' });
+      }
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      // Fallback if consigner_balance doesn't exist
+      const result = await query(`
+        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+          0 as outstanding_balance, 0 as total_freight, 0 as total_paid
+        FROM transporters p
+        WHERE LOWER(p.name) = LOWER($1)
+        LIMIT 1
+      `, [req.params.name]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Consigner not found' });
+      }
+
+      res.json(result.rows[0]);
     }
-
-    res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
