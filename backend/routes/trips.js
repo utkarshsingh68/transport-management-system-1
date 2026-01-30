@@ -244,7 +244,7 @@ router.post('/',
       let amountDue = freightAmountNum;
 
       if (paymentScenario === 'full_to_driver' && freightAmountNum > 0) {
-        paymentStatus = 'paid';
+        paymentStatus = 'completed';  // Changed from 'paid' to 'completed'
         amountPaid = freightAmountNum;
         amountDue = 0;
       } else if (paymentScenario === 'partial_to_driver' && amountPaidToDriver > 0) {
