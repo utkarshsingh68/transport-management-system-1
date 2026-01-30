@@ -9,7 +9,8 @@
     "start": "node server.js",
     "init-db": "node scripts/initDatabase.js",
     "migrate-trip-money": "node scripts/migrateTripMoneyFields.js",
-    "migrate-trip-spend-expenses": "node scripts/migrateTripSpendExpenses.js"
+    "migrate-trip-spend-expenses": "node scripts/migrateTripSpendExpenses.js",
+    "migrate-documents": "node scripts/migrateDocuments.js"
   },
   "dependencies": {
     "express": "^4.18.2",
