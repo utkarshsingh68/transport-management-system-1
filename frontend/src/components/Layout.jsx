@@ -18,6 +18,7 @@ import {
   Bell,
   Search,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,6 +43,7 @@ const Layout = () => {
     { name: 'Parties', href: '/parties', icon: Building2, color: 'from-cyan-500 to-blue-600' },
     { name: 'Salary', href: '/salary', icon: Wallet, color: 'from-teal-500 to-emerald-600' },
     { name: 'Ledger', href: '/ledger', icon: BookOpen, color: 'from-indigo-500 to-violet-600' },
+    { name: 'Documents', href: '/documents', icon: FileText, color: 'from-sky-500 to-cyan-600' },
     { name: 'Profit & Loss', href: '/profit-loss', icon: TrendingUp, color: 'from-green-500 to-emerald-600' },
     { name: 'Reports', href: '/reports', icon: BarChart3, color: 'from-purple-500 to-indigo-600' },
   ];

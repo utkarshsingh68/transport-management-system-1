@@ -19,6 +19,7 @@ import Parties from './pages/Parties';
 import Salary from './pages/Salary';
 import Ledger from './pages/Ledger';
 import ProfitLoss from './pages/ProfitLoss';
+import Documents from './pages/Documents';
 
 function App() {
   return (
@@ -45,6 +46,7 @@ function App() {
             <Route path="salary" element={<Salary />} />
             <Route path="ledger" element={<Ledger />} />
             <Route path="profit-loss" element={<ProfitLoss />} />
+            <Route path="documents" element={<Documents />} />
             <Route path="reports" element={<Reports />} />
           </Route>
         </Routes>

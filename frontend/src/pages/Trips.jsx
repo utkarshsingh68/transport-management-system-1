@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route } from 'lucide-react';
+import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
 
@@ -12,6 +12,10 @@ const Trips = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const [formData, setFormData] = useState({
     trip_number: '',
@@ -160,6 +164,16 @@ const Trips = () => {
     trip.truck_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     trip.driver_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredTrips.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedTrips = filteredTrips.slice(startIndex, startIndex + itemsPerPage);
+  
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
 
   // Calculate stats
   const totalIncome = trips.reduce((sum, t) => sum + (parseFloat(t.actual_income) || 0), 0);
@@ -319,7 +333,7 @@ const Trips = () => {
                   </td>
                 </tr>
               ) : (
-                filteredTrips.map((trip, idx) => {
+                paginatedTrips.map((trip, idx) => {
                   const advance = parseFloat(trip.driver_advance_amount) || 0;
                   const spent = parseFloat(trip.trip_spent_amount) || 0;
                   const balance = advance - spent;
@@ -397,6 +411,65 @@ const Trips = () => {
             </tbody>
           </table>
         </div>
+        
+        {/* Pagination */}
+        {filteredTrips.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border-t border-slate-100">
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <span>Show</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                className="px-2 py-1 border border-slate-200 rounded-lg text-sm"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span>entries</span>
+              <span className="mx-2">|</span>
+              <span>Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredTrips.length)} of {filteredTrips.length}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="pagination-btn"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let pageNum;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`pagination-btn ${currentPage === pageNum ? 'pagination-btn-active' : ''}`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="pagination-btn"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal */}

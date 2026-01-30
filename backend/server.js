@@ -20,6 +20,7 @@ import partiesRoutes from './routes/parties.js';
 import salaryRoutes from './routes/salary.js';
 import ledgerRoutes from './routes/ledger.js';
 import pnlRoutes from './routes/pnl.js';
+import documentsRoutes from './routes/documents.js';
 
 dotenv.config();
 
@@ -60,6 +61,7 @@ app.use('/api/parties', partiesRoutes);
 app.use('/api/salary', salaryRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/pnl', pnlRoutes);
+app.use('/api/documents', documentsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

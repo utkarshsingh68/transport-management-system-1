@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
+import { Download, FileSpreadsheet, FileText } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend);
 
@@ -167,6 +168,25 @@ export default function ProfitLoss() {
           <p className="text-slate-500 mt-1">Comprehensive financial overview of your business</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {/* Export Buttons */}
+          <div className="flex items-center gap-2 border-r border-slate-200 pr-3 mr-1">
+            <a
+              href={`${import.meta.env.VITE_API_URL}/reports/export/pnl/excel?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors text-sm font-medium"
+              title="Download Excel"
+            >
+              <FileSpreadsheet size={16} />
+              <span className="hidden sm:inline">Excel</span>
+            </a>
+            <a
+              href={`${import.meta.env.VITE_API_URL}/reports/export/pnl/pdf?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium"
+              title="Download PDF"
+            >
+              <FileText size={16} />
+              <span className="hidden sm:inline">PDF</span>
+            </a>
+          </div>
           <select 
             onChange={(e) => setQuickDate(e.target.value)} 
             className="px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white" 
