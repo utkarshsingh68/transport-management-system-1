@@ -127,7 +127,7 @@ const Trips = () => {
       setTrips(tripsRes.data);
       setTrucks(trucksRes.data);
       setDrivers(driversRes.data);
-      setParties(partiesRes.data.filter(p => p.type === 'consigner' || p.type === 'both'));
+      setParties(partiesRes.data);
     } catch (error) {
       toast.error('Failed to fetch data');
     } finally {

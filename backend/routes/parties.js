@@ -16,14 +16,13 @@ router.get('/search', async (req, res, next) => {
     }
 
     const result = await query(`
-      SELECT p.id, p.name, p.phone, p.address, p.type, p.email, p.gstin,
+      SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
         COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
         COALESCE(cb.total_freight, 0) as total_freight,
         COALESCE(cb.total_paid, 0) as total_paid
-      FROM parties p
+      FROM transporters p
       LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
-      WHERE (p.type = 'consigner' OR p.type = 'both')
-        AND LOWER(p.name) LIKE LOWER($1)
+      WHERE LOWER(p.name) LIKE LOWER($1)
       ORDER BY p.name
       LIMIT 10
     `, [`%${name}%`]);
@@ -38,14 +37,13 @@ router.get('/search', async (req, res, next) => {
 router.get('/by-name/:name', async (req, res, next) => {
   try {
     const result = await query(`
-      SELECT p.id, p.name, p.phone, p.address, p.type, p.email, p.gstin,
+      SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
         COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
         COALESCE(cb.total_freight, 0) as total_freight,
         COALESCE(cb.total_paid, 0) as total_paid
-      FROM parties p
+      FROM transporters p
       LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
       WHERE LOWER(p.name) = LOWER($1)
-        AND (p.type = 'consigner' OR p.type = 'both')
       LIMIT 1
     `, [req.params.name]);
 

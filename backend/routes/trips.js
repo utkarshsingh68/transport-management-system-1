@@ -212,7 +212,7 @@ router.post('/',
       if (consignor_name && !consigner_id) {
         // Check if party exists by name
         const existingParty = await query(
-          `SELECT id FROM parties WHERE LOWER(name) = LOWER($1) AND (type = 'consigner' OR type = 'both') LIMIT 1`,
+          `SELECT id FROM transporters WHERE LOWER(name) = LOWER($1) LIMIT 1`,
           [consignor_name]
         );
         
@@ -221,8 +221,8 @@ router.post('/',
         } else {
           // Create new party
           const newParty = await query(
-            `INSERT INTO parties (name, type, created_by) VALUES ($1, 'consigner', $2) RETURNING id`,
-            [consignor_name, req.user.id]
+            `INSERT INTO transporters (name, opening_balance) VALUES ($1, 0) RETURNING id`,
+            [consignor_name]
           );
           finalConsignerId = newParty.rows[0].id;
         }
