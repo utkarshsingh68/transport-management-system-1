@@ -4,12 +4,15 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pool from '../config/database.js';
-import authMiddleware from '../middleware/auth.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+// Apply auth middleware to all routes
+router.use(authenticateToken);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -42,7 +45,7 @@ const upload = multer({
 });
 
 // Get all documents with optional filters
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { entity_type, entity_id, document_type, status } = req.query;
     let query = `
@@ -94,7 +97,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Get documents expiring soon (for notifications)
-router.get('/expiring', authMiddleware, async (req, res) => {
+router.get('/expiring', async (req, res) => {
   try {
     const { days = 30 } = req.query;
     const result = await pool.query(`
@@ -120,7 +123,7 @@ router.get('/expiring', authMiddleware, async (req, res) => {
 });
 
 // Get expired documents
-router.get('/expired', authMiddleware, async (req, res) => {
+router.get('/expired', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT d.*, 
@@ -143,7 +146,7 @@ router.get('/expired', authMiddleware, async (req, res) => {
 });
 
 // Get document summary/stats
-router.get('/summary', authMiddleware, async (req, res) => {
+router.get('/summary', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -161,7 +164,7 @@ router.get('/summary', authMiddleware, async (req, res) => {
 });
 
 // Upload new document
-router.post('/', authMiddleware, upload.single('file'), async (req, res) => {
+router.post('/', upload.single('file'), async (req, res) => {
   try {
     const {
       document_type,
@@ -201,7 +204,7 @@ router.post('/', authMiddleware, upload.single('file'), async (req, res) => {
 });
 
 // Update document
-router.put('/:id', authMiddleware, upload.single('file'), async (req, res) => {
+router.put('/:id', upload.single('file'), async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -251,7 +254,7 @@ router.put('/:id', authMiddleware, upload.single('file'), async (req, res) => {
 });
 
 // Delete document
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -273,7 +276,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 });
 
 // Serve document file
-router.get('/file/:filename', authMiddleware, (req, res) => {
+router.get('/file/:filename', (req, res) => {
   const filePath = path.join(__dirname, '../uploads/documents', req.params.filename);
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
