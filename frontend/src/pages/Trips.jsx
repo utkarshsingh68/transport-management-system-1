@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route, ChevronLeft, ChevronRight, Download, CreditCard, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route, ChevronLeft, ChevronRight, Download, CreditCard, AlertCircle, Wallet, IndianRupee } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
 
@@ -17,6 +17,14 @@ const Trips = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Consigner search state
+  const [consignerSearch, setConsignerSearch] = useState('');
+  const [consignerSuggestions, setConsignerSuggestions] = useState([]);
+  const [showConsignerSuggestions, setShowConsignerSuggestions] = useState(false);
+  const [selectedConsignerDetails, setSelectedConsignerDetails] = useState(null);
+  const [loadingConsignerDetails, setLoadingConsignerDetails] = useState(false);
+  const consignerInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     trip_number: '',
@@ -41,11 +49,70 @@ const Trips = () => {
     freight_amount: '',
     payment_due_date: '',
     consigner_id: '',
+    payment_scenario: 'not_paid',
+    amount_paid_to_driver: '',
   });
 
   useEffect(() => {
     fetchData();
   }, [filterStatus]);
+
+  // Search consigners as user types
+  useEffect(() => {
+    const searchConsigners = async () => {
+      if (consignerSearch.length < 2) {
+        setConsignerSuggestions([]);
+        return;
+      }
+      
+      try {
+        const response = await api.get(`/parties/search?name=${consignerSearch}`);
+        setConsignerSuggestions(response.data);
+      } catch (error) {
+        console.error('Failed to search consigners', error);
+      }
+    };
+
+    const debounce = setTimeout(searchConsigners, 300);
+    return () => clearTimeout(debounce);
+  }, [consignerSearch]);
+
+  // Handle consigner selection
+  const handleConsignerSelect = async (consigner) => {
+    setConsignerSearch(consigner.name);
+    setFormData(prev => ({
+      ...prev,
+      consignor_name: consigner.name,
+      consigner_id: consigner.id,
+    }));
+    setSelectedConsignerDetails(consigner);
+    setShowConsignerSuggestions(false);
+    toast.info(`Selected: ${consigner.name} | Outstanding: ₹${parseFloat(consigner.outstanding_balance || 0).toLocaleString('en-IN')}`);
+  };
+
+  // Fetch consigner details when name is entered
+  const fetchConsignerDetails = async (name) => {
+    if (!name) {
+      setSelectedConsignerDetails(null);
+      return;
+    }
+
+    setLoadingConsignerDetails(true);
+    try {
+      const response = await api.get(`/parties/by-name/${encodeURIComponent(name)}`);
+      setSelectedConsignerDetails(response.data);
+      setFormData(prev => ({ ...prev, consigner_id: response.data.id }));
+      toast.info(`Consigner found | Outstanding: ₹${parseFloat(response.data.outstanding_balance || 0).toLocaleString('en-IN')}`);
+    } catch (error) {
+      if (error.response?.status === 404) {
+        setSelectedConsignerDetails(null);
+        setFormData(prev => ({ ...prev, consigner_id: '' }));
+        toast.info(`New consigner "${name}" will be created automatically`);
+      }
+    } finally {
+      setLoadingConsignerDetails(false);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -150,6 +217,9 @@ const Trips = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingTrip(null);
+    setConsignerSearch('');
+    setSelectedConsignerDetails(null);
+    setConsignerSuggestions([]);
     setFormData({
       trip_number: '',
       truck_id: '',
@@ -173,6 +243,8 @@ const Trips = () => {
       freight_amount: '',
       payment_due_date: '',
       consigner_id: '',
+      payment_scenario: 'not_paid',
+      amount_paid_to_driver: '',
     });
   };
 
@@ -751,15 +823,79 @@ const Trips = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Consignor Name</label>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Consigner Name {selectedConsignerDetails && '✓'}
+                  </label>
                   <input
+                    ref={consignerInputRef}
                     type="text"
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                    value={formData.consignor_name}
-                    onChange={(e) => setFormData({ ...formData, consignor_name: e.target.value })}
-                    placeholder="Sender name"
+                    value={consignerSearch}
+                    onChange={(e) => {
+                      setConsignerSearch(e.target.value);
+                      setShowConsignerSuggestions(true);
+                      setFormData(prev => ({ ...prev, consignor_name: e.target.value, consigner_id: '' }));
+                      setSelectedConsignerDetails(null);
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setShowConsignerSuggestions(false), 200);
+                      if (consignerSearch && !selectedConsignerDetails) {
+                        fetchConsignerDetails(consignerSearch);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (consignerSuggestions.length > 0) {
+                        setShowConsignerSuggestions(true);
+                      }
+                    }}
+                    placeholder="Start typing consigner name..."
                   />
+                  {loadingConsignerDetails && (
+                    <div className="absolute right-3 top-10 text-blue-600">
+                      <div className="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                    </div>
+                  )}
+                  {showConsignerSuggestions && consignerSuggestions.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                      {consignerSuggestions.map((consigner) => (
+                        <div
+                          key={consigner.id}
+                          className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0"
+                          onClick={() => handleConsignerSelect(consigner)}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-medium text-slate-900">{consigner.name}</p>
+                              {consigner.phone && <p className="text-xs text-slate-500">{consigner.phone}</p>}
+                            </div>
+                            <div className="text-right">
+                              <p className={`text-sm font-semibold ${parseFloat(consigner.outstanding_balance) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                ₹{Math.abs(parseFloat(consigner.outstanding_balance || 0)).toLocaleString('en-IN')}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {parseFloat(consigner.outstanding_balance) > 0 ? 'Outstanding' : 'Clear'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {selectedConsignerDetails && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-xs text-blue-700 font-medium">Current Outstanding</p>
+                          <p className="text-lg font-bold text-blue-900">₹{parseFloat(selectedConsignerDetails.outstanding_balance || 0).toLocaleString('en-IN')}</p>
+                        </div>
+                        <div className="text-right text-xs text-blue-600">
+                          <p>Total Freight: ₹{parseFloat(selectedConsignerDetails.total_freight || 0).toLocaleString('en-IN')}</p>
+                          <p>Total Paid: ₹{parseFloat(selectedConsignerDetails.total_paid || 0).toLocaleString('en-IN')}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Consignee Name</label>
@@ -783,55 +919,221 @@ const Trips = () => {
                 </div>
               </div>
 
-              {/* Payment Section */}
-              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                <h4 className="font-semibold text-amber-900 mb-3 flex items-center gap-2">
-                  <CreditCard size={18} />
-                  Payment Details
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Consigner (Party)</label>
-                    <select
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
-                      value={formData.consigner_id}
-                      onChange={(e) => setFormData({ ...formData, consigner_id: e.target.value })}
-                    >
-                      <option value="">Select Consigner</option>
-                      {parties.map((party) => (
-                        <option key={party.id} value={party.id}>
-                          {party.name}
-                        </option>
-                      ))}
-                    </select>
+              {/* Payment Section - Enhanced */}
+              {!editingTrip && (
+                <div className="border-t border-slate-200 pt-5">
+                  <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                    <span className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                      <Wallet size={18} className="text-green-600" />
+                    </span>
+                    Trip Payment Options
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Freight Amount (₹) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        value={formData.freight_amount}
+                        onChange={(e) => setFormData({ ...formData, freight_amount: e.target.value })}
+                        placeholder="Enter freight amount"
+                        required={!!consignerSearch}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Payment Due Date</label>
+                      <input
+                        type="date"
+                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        value={formData.payment_due_date}
+                        onChange={(e) => setFormData({ ...formData, payment_due_date: e.target.value })}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Freight Amount (₹)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      value={formData.freight_amount}
-                      onChange={(e) => setFormData({ ...formData, freight_amount: e.target.value })}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Payment Due Date</label>
-                    <input
-                      type="date"
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      value={formData.payment_due_date}
-                      onChange={(e) => setFormData({ ...formData, payment_due_date: e.target.value })}
-                    />
-                  </div>
+
+                  {formData.freight_amount && parseFloat(formData.freight_amount) > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-200">
+                      <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                        <IndianRupee size={18} />
+                        How is the payment being handled?
+                      </h4>
+                      
+                      <div className="space-y-3">
+                        {/* Option 1: Full payment to driver */}
+                        <label className="flex items-start gap-3 p-4 bg-white rounded-lg border-2 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm"
+                          style={{ borderColor: formData.payment_scenario === 'full_to_driver' ? '#3b82f6' : '#e2e8f0' }}
+                        >
+                          <input
+                            type="radio"
+                            name="payment_scenario"
+                            value="full_to_driver"
+                            checked={formData.payment_scenario === 'full_to_driver'}
+                            onChange={(e) => setFormData({ ...formData, payment_scenario: e.target.value, amount_paid_to_driver: formData.freight_amount })}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-semibold text-slate-900">Full Payment Paid to Driver</p>
+                              <span className="text-green-600 font-bold">₹{parseFloat(formData.freight_amount).toLocaleString('en-IN')}</span>
+                            </div>
+                            <p className="text-sm text-slate-600 mt-1">
+                              Driver has received full freight amount. Trip marked as fully paid.
+                            </p>
+                          </div>
+                        </label>
+
+                        {/* Option 2: Payment left with party */}
+                        <label className="flex items-start gap-3 p-4 bg-white rounded-lg border-2 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm"
+                          style={{ borderColor: formData.payment_scenario === 'left_with_party' ? '#3b82f6' : '#e2e8f0' }}
+                        >
+                          <input
+                            type="radio"
+                            name="payment_scenario"
+                            value="left_with_party"
+                            checked={formData.payment_scenario === 'left_with_party'}
+                            onChange={(e) => setFormData({ ...formData, payment_scenario: e.target.value, amount_paid_to_driver: '0' })}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-semibold text-slate-900">Payment Left with Party/Consigner</p>
+                              <span className="text-amber-600 font-bold">₹0 to driver</span>
+                            </div>
+                            <p className="text-sm text-slate-600 mt-1">
+                              Payment not given to driver. Full amount added to consigner's udhari ledger.
+                            </p>
+                            <p className="text-xs text-amber-600 mt-2 font-medium">
+                              ⚠️ Outstanding will increase by ₹{parseFloat(formData.freight_amount).toLocaleString('en-IN')}
+                            </p>
+                          </div>
+                        </label>
+
+                        {/* Option 3: Partial payment */}
+                        <label className="flex items-start gap-3 p-4 bg-white rounded-lg border-2 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm"
+                          style={{ borderColor: formData.payment_scenario === 'partial_to_driver' ? '#3b82f6' : '#e2e8f0' }}
+                        >
+                          <input
+                            type="radio"
+                            name="payment_scenario"
+                            value="partial_to_driver"
+                            checked={formData.payment_scenario === 'partial_to_driver'}
+                            onChange={(e) => setFormData({ ...formData, payment_scenario: e.target.value, amount_paid_to_driver: '' })}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-semibold text-slate-900">Partial Payment Paid to Driver</p>
+                            </div>
+                            <p className="text-sm text-slate-600 mt-1">
+                              Driver received partial amount. Remaining added to consigner's udhari.
+                            </p>
+                            {formData.payment_scenario === 'partial_to_driver' && (
+                              <div className="mt-3">
+                                <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount Paid to Driver (₹)</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  max={formData.freight_amount}
+                                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  value={formData.amount_paid_to_driver}
+                                  onChange={(e) => setFormData({ ...formData, amount_paid_to_driver: e.target.value })}
+                                  placeholder="Enter partial amount"
+                                  required
+                                />
+                                {formData.amount_paid_to_driver && parseFloat(formData.amount_paid_to_driver) > 0 && (
+                                  <div className="mt-2 flex justify-between text-sm">
+                                    <span className="text-green-600 font-medium">To Driver: ₹{parseFloat(formData.amount_paid_to_driver).toLocaleString('en-IN')}</span>
+                                    <span className="text-red-600 font-medium">Outstanding: ₹{(parseFloat(formData.freight_amount) - parseFloat(formData.amount_paid_to_driver)).toLocaleString('en-IN')}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+
+                        {/* Option 4: Not paid (default) */}
+                        <label className="flex items-start gap-3 p-4 bg-white rounded-lg border-2 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm"
+                          style={{ borderColor: formData.payment_scenario === 'not_paid' ? '#3b82f6' : '#e2e8f0' }}
+                        >
+                          <input
+                            type="radio"
+                            name="payment_scenario"
+                            value="not_paid"
+                            checked={formData.payment_scenario === 'not_paid'}
+                            onChange={(e) => setFormData({ ...formData, payment_scenario: e.target.value, amount_paid_to_driver: '0' })}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="font-semibold text-slate-900">Payment Not Received Yet</p>
+                              <span className="text-slate-600 font-bold">Pending</span>
+                            </div>
+                            <p className="text-sm text-slate-600 mt-1">
+                              Payment pending. Full amount will be tracked in consigner udhari ledger.
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+
+                      {/* Summary Box */}
+                      {consignerSearch && (
+                        <div className="mt-4 p-4 bg-white border border-slate-200 rounded-lg">
+                          <h5 className="font-semibold text-slate-900 mb-2">Payment Summary</h5>
+                          <div className="space-y-1.5 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Freight Amount:</span>
+                              <span className="font-semibold text-slate-900">₹{parseFloat(formData.freight_amount).toLocaleString('en-IN')}</span>
+                            </div>
+                            {selectedConsignerDetails && (
+                              <div className="flex justify-between">
+                                <span className="text-slate-600">Current Outstanding:</span>
+                                <span className="font-semibold text-red-600">₹{parseFloat(selectedConsignerDetails.outstanding_balance || 0).toLocaleString('en-IN')}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Amount to Driver:</span>
+                              <span className="font-semibold text-green-600">
+                                ₹{(formData.payment_scenario === 'full_to_driver' 
+                                  ? parseFloat(formData.freight_amount) 
+                                  : formData.payment_scenario === 'partial_to_driver' && formData.amount_paid_to_driver
+                                  ? parseFloat(formData.amount_paid_to_driver)
+                                  : 0).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            <div className="flex justify-between pt-2 border-t border-slate-200">
+                              <span className="text-slate-600">Will be Added to Udhari:</span>
+                              <span className="font-bold text-red-600">
+                                ₹{(formData.payment_scenario === 'full_to_driver'
+                                  ? 0
+                                  : formData.payment_scenario === 'partial_to_driver' && formData.amount_paid_to_driver
+                                  ? parseFloat(formData.freight_amount) - parseFloat(formData.amount_paid_to_driver)
+                                  : parseFloat(formData.freight_amount)).toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            {selectedConsignerDetails && (
+                              <div className="flex justify-between text-base font-bold pt-2 border-t border-slate-200">
+                                <span className="text-slate-900">New Outstanding Balance:</span>
+                                <span className="text-red-600">
+                                  ₹{(parseFloat(selectedConsignerDetails.outstanding_balance || 0) + 
+                                     (formData.payment_scenario === 'full_to_driver'
+                                       ? 0
+                                       : formData.payment_scenario === 'partial_to_driver' && formData.amount_paid_to_driver
+                                       ? parseFloat(formData.freight_amount) - parseFloat(formData.amount_paid_to_driver)
+                                       : parseFloat(formData.freight_amount))).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {formData.consigner_id && formData.freight_amount && (
-                  <p className="text-xs text-amber-700 mt-2 flex items-center gap-1">
-                    <AlertCircle size={14} />
-                    This amount will be added to consigner's udhari (credit ledger)
-                  </p>
-                )}
+              )}
               </div>
 
               <div>

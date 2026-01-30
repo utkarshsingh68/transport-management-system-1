@@ -7,6 +7,58 @@ const router = express.Router();
 
 router.use(authenticateToken);
 
+// Search consigner by name (auto-complete)
+router.get('/search', async (req, res, next) => {
+  try {
+    const { name } = req.query;
+    if (!name) {
+      return res.json([]);
+    }
+
+    const result = await query(`
+      SELECT p.id, p.name, p.phone, p.address, p.type, p.email, p.gstin,
+        COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
+        COALESCE(cb.total_freight, 0) as total_freight,
+        COALESCE(cb.total_paid, 0) as total_paid
+      FROM parties p
+      LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
+      WHERE (p.type = 'consigner' OR p.type = 'both')
+        AND LOWER(p.name) LIKE LOWER($1)
+      ORDER BY p.name
+      LIMIT 10
+    `, [`%${name}%`]);
+
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get consigner by exact name with balance
+router.get('/by-name/:name', async (req, res, next) => {
+  try {
+    const result = await query(`
+      SELECT p.id, p.name, p.phone, p.address, p.type, p.email, p.gstin,
+        COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
+        COALESCE(cb.total_freight, 0) as total_freight,
+        COALESCE(cb.total_paid, 0) as total_paid
+      FROM parties p
+      LEFT JOIN consigner_balance cb ON p.id = cb.consigner_id
+      WHERE LOWER(p.name) = LOWER($1)
+        AND (p.type = 'consigner' OR p.type = 'both')
+      LIMIT 1
+    `, [req.params.name]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Consigner not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get all parties (transporters/customers)
 router.get('/', async (req, res, next) => {
   try {

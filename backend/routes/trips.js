@@ -207,6 +207,49 @@ router.post('/',
 
       const calculated_income = calculateIncome(rate_type, weightTonsNum, ratePerTonNum, distanceKmNum, fixedAmountNum);
 
+      // Auto-create party if consigner_name is provided but no consigner_id
+      let finalConsignerId = consigner_id;
+      if (consignor_name && !consigner_id) {
+        // Check if party exists by name
+        const existingParty = await query(
+          `SELECT id FROM parties WHERE LOWER(name) = LOWER($1) AND (type = 'consigner' OR type = 'both') LIMIT 1`,
+          [consignor_name]
+        );
+        
+        if (existingParty.rows.length > 0) {
+          finalConsignerId = existingParty.rows[0].id;
+        } else {
+          // Create new party
+          const newParty = await query(
+            `INSERT INTO parties (name, type, created_by) VALUES ($1, 'consigner', $2) RETURNING id`,
+            [consignor_name, req.user.id]
+          );
+          finalConsignerId = newParty.rows[0].id;
+        }
+      }
+
+      // Handle payment scenarios from req.body.payment_scenario
+      const paymentScenario = req.body.payment_scenario || 'not_paid'; // 'full_to_driver', 'left_with_party', 'partial_to_driver'
+      const amountPaidToDriver = toMoneyNumber(req.body.amount_paid_to_driver || 0);
+      
+      let paymentStatus = 'pending';
+      let amountPaid = 0;
+      let amountDue = freightAmountNum;
+
+      if (paymentScenario === 'full_to_driver' && freightAmountNum > 0) {
+        paymentStatus = 'paid';
+        amountPaid = freightAmountNum;
+        amountDue = 0;
+      } else if (paymentScenario === 'partial_to_driver' && amountPaidToDriver > 0) {
+        paymentStatus = 'partial';
+        amountPaid = amountPaidToDriver;
+        amountDue = freightAmountNum - amountPaidToDriver;
+      } else if (paymentScenario === 'left_with_party') {
+        paymentStatus = 'pending';
+        amountPaid = 0;
+        amountDue = freightAmountNum;
+      }
+
       const result = await query(
         `INSERT INTO trips (
           trip_number, truck_id, driver_id, from_location, to_location,
@@ -214,8 +257,8 @@ router.post('/',
           rate_type, fixed_amount, calculated_income, actual_income,
           driver_advance_amount, trip_spent_amount,
           consignor_name, consignee_name, lr_number, status, notes, created_by,
-          freight_amount, amount_due, payment_status, payment_due_date, consigner_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+          freight_amount, amount_paid, amount_due, payment_status, payment_due_date, consigner_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
         RETURNING *`,
         [
           trip_number, truck_id, driver_id, from_location, to_location,
@@ -223,44 +266,73 @@ router.post('/',
           rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
           driverAdvanceAmountNum, tripSpentAmountNum,
           consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id,
-          freightAmountNum, freightAmountNum, 'pending', payment_due_date || null, consigner_id || null
+          freightAmountNum, amountPaid, amountDue, paymentStatus, payment_due_date || null, finalConsignerId
         ]
       );
 
       const createdTrip = result.rows[0];
       
+      // Record payment to driver if applicable
+      if (amountPaid > 0 && paymentScenario !== 'left_with_party') {
+        await query(
+          `INSERT INTO trip_payments (trip_id, amount, payment_date, payment_mode, notes, created_by)
+           VALUES ($1, $2, $3, 'cash', $4, $5)`,
+          [createdTrip.id, amountPaid, start_date, `Payment to driver: ${paymentScenario === 'full_to_driver' ? 'Full' : 'Partial'}`, req.user.id]
+        );
+      }
+      
       // Update consigner ledger if freight amount and consigner are set
-      if (freightAmountNum > 0 && consigner_id) {
+      if (freightAmountNum > 0 && finalConsignerId) {
         // Get current balance
         const balanceResult = await query(
           'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
-          [consigner_id]
+          [finalConsignerId]
         );
 
         let currentBalance = balanceResult.rows.length > 0 
           ? parseFloat(balanceResult.rows[0].outstanding_balance) 
           : 0;
-        const newBalance = currentBalance + freightAmountNum;
-
-        // Record in ledger
+        
+        // Add freight as credit (what consigner owes)
+        let balanceAfterFreight = currentBalance + freightAmountNum;
+        
+        // Record freight in ledger as credit (debit to consigner)
         await query(
           `INSERT INTO consigner_ledger (consigner_id, trip_id, transaction_type, amount, balance_after, description, transaction_date, created_by)
            VALUES ($1, $2, 'credit', $3, $4, $5, $6, $7)`,
-          [consigner_id, createdTrip.id, freightAmountNum, newBalance, `New trip: ${trip_number} (${from_location} → ${to_location})`, start_date, req.user.id]
+          [finalConsignerId, createdTrip.id, freightAmountNum, balanceAfterFreight, `New trip: ${trip_number} (${from_location} → ${to_location})`, start_date, req.user.id]
         );
-
-        // Update/Insert consigner balance
+        
+        // If payment was made (full or partial), reduce the balance
+        let finalBalance = balanceAfterFreight;
+        if (amountPaid > 0) {
+          finalBalance = balanceAfterFreight - amountPaid;
+          
+          // Record payment in ledger as debit (credit to consigner)
+          const paymentDesc = paymentScenario === 'full_to_driver' 
+            ? `Full payment received (paid to driver)` 
+            : `Partial payment received: ₹${amountPaid} (paid to driver)`;
+          
+          await query(
+            `INSERT INTO consigner_ledger (consigner_id, trip_id, transaction_type, amount, balance_after, description, transaction_date, created_by)
+             VALUES ($1, $2, 'debit', $3, $4, $5, $6, $7)`,
+            [finalConsignerId, createdTrip.id, amountPaid, finalBalance, paymentDesc, start_date, req.user.id]
+          );
+        }
+        
+        // Update or insert consigner balance
         await query(
-          `INSERT INTO consigner_balance (consigner_id, outstanding_balance, total_trips, total_freight, last_trip_date)
-           VALUES ($1, $2, 1, $3, $4)
+          `INSERT INTO consigner_balance (consigner_id, outstanding_balance, total_freight, total_paid, total_trips, last_trip_date, last_updated)
+           VALUES ($1, $2, $3, $4, 1, $5, CURRENT_TIMESTAMP)
            ON CONFLICT (consigner_id) 
            DO UPDATE SET 
-             outstanding_balance = $2,
-             total_trips = consigner_balance.total_trips + 1,
+             outstanding_balance = consigner_balance.outstanding_balance + $2,
              total_freight = consigner_balance.total_freight + $3,
-             last_trip_date = $4,
-             updated_at = CURRENT_TIMESTAMP`,
-          [consigner_id, newBalance, freightAmountNum, start_date]
+             total_paid = consigner_balance.total_paid + $4,
+             total_trips = consigner_balance.total_trips + 1,
+             last_trip_date = $5,
+             last_updated = CURRENT_TIMESTAMP`,
+          [finalConsignerId, amountDue, freightAmountNum, amountPaid, start_date]
         );
       }
       
