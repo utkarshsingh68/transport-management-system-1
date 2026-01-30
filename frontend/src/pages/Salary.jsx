@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Wallet, CreditCard, Users, Clock, DollarSign, X } from 'lucide-react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api';
+import api from '../services/api';
 
 export default function Salary() {
   const [activeTab, setActiveTab] = useState('salaries');
@@ -27,12 +25,10 @@ export default function Salary() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
       const [salariesRes, advancesRes, driversRes] = await Promise.all([
-        axios.get(`${API_URL}/salary/salaries`, { headers }),
-        axios.get(`${API_URL}/salary/advances`, { headers }),
-        axios.get(`${API_URL}/drivers`, { headers })
+        api.get('/salary/salaries'),
+        api.get('/salary/advances'),
+        api.get('/drivers')
       ]);
       setSalaries(salariesRes.data);
       setAdvances(advancesRes.data);
@@ -47,10 +43,7 @@ export default function Salary() {
   const handleSalarySubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(`${API_URL}/salary/salaries`, salaryForm, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.post('/salary/salaries', salaryForm);
       setShowSalaryModal(false);
       setSalaryForm({ driver_id: '', payment_date: new Date().toISOString().split('T')[0], month: '', basic_salary: '', allowances: 0, deductions: 0, advance_adjusted: 0, payment_mode: 'cash', notes: '' });
       fetchData();
@@ -62,10 +55,7 @@ export default function Salary() {
   const handleAdvanceSubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(`${API_URL}/salary/advances`, advanceForm, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.post('/salary/advances', advanceForm);
       setShowAdvanceModal(false);
       setAdvanceForm({ driver_id: '', advance_date: new Date().toISOString().split('T')[0], amount: '', purpose: '', payment_mode: 'cash', notes: '' });
       fetchData();

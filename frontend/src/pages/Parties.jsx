@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, BookOpen, X, Users, TrendingUp, TrendingDown, Search } from 'lucide-react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api';
+import api from '../services/api';
 
 export default function Parties() {
   const [parties, setParties] = useState([]);
@@ -23,10 +21,7 @@ export default function Parties() {
 
   const fetchParties = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/parties`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/parties');
       setParties(response.data);
     } catch (error) {
       console.error('Error fetching parties:', error);
@@ -37,10 +32,7 @@ export default function Parties() {
 
   const fetchLedger = async (partyId) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/parties/${partyId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/parties/${partyId}`);
       setLedgerData(response.data);
       setShowLedger(true);
     } catch (error) {
@@ -51,15 +43,10 @@ export default function Parties() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('token');
       if (selectedParty) {
-        await axios.put(`${API_URL}/parties/${selectedParty.id}`, formData, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        await api.put(`/parties/${selectedParty.id}`, formData);
       } else {
-        await axios.post(`${API_URL}/parties`, formData, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        await api.post('/parties', formData);
       }
       setShowModal(false);
       setSelectedParty(null);

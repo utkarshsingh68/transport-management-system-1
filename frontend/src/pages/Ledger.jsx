@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Wallet, Building2, PiggyBank, CreditCard, X, Banknote, BookOpen } from 'lucide-react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api';
+import api from '../services/api';
 
 export default function Ledger() {
   const [activeTab, setActiveTab] = useState('cash');
@@ -33,12 +31,10 @@ export default function Ledger() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
       const [cashRes, bankRes, summaryRes] = await Promise.all([
-        axios.get(`${API_URL}/ledger/cash`, { headers }),
-        axios.get(`${API_URL}/ledger/bank`, { headers }),
-        axios.get(`${API_URL}/ledger/summary`, { headers })
+        api.get('/ledger/cash'),
+        api.get('/ledger/bank'),
+        api.get('/ledger/summary')
       ]);
       setCashTransactions(cashRes.data);
       setBankTransactions(bankRes.data);
@@ -53,15 +49,12 @@ export default function Ledger() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('token');
       const endpoint = transactionType === 'cash' ? '/ledger/cash' : '/ledger/bank';
       const payload = { ...formData };
       if (transactionType === 'bank') {
         payload.transaction_type = formData.transaction_type === 'income' ? 'credit' : 'debit';
       }
-      await axios.post(`${API_URL}${endpoint}`, payload, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.post(endpoint, payload);
       setShowModal(false);
       setFormData({
         transaction_date: new Date().toISOString().split('T')[0],

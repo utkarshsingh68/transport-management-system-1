@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend);
-
-const API_URL = 'http://localhost:5000/api';
 
 export default function ProfitLoss() {
   const [pnlData, setPnlData] = useState(null);
@@ -27,16 +25,14 @@ export default function ProfitLoss() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
       const params = { start_date: dateRange.start_date, end_date: dateRange.end_date };
 
       const [pnlRes, truckRes, driverRes, trendRes, breakdownRes] = await Promise.all([
-        axios.get(`${API_URL}/pnl/pnl`, { headers, params }),
-        axios.get(`${API_URL}/pnl/pnl/truck-wise`, { headers, params }),
-        axios.get(`${API_URL}/pnl/pnl/driver-wise`, { headers, params }),
-        axios.get(`${API_URL}/pnl/pnl/monthly-trend`, { headers, params: { months: 12 } }),
-        axios.get(`${API_URL}/pnl/expense-breakdown`, { headers, params })
+        api.get('/pnl/pnl', { params }),
+        api.get('/pnl/pnl/truck-wise', { params }),
+        api.get('/pnl/pnl/driver-wise', { params }),
+        api.get('/pnl/pnl/monthly-trend', { params: { months: 12 } }),
+        api.get('/pnl/expense-breakdown', { params })
       ]);
 
       setPnlData(pnlRes.data);
