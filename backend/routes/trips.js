@@ -208,12 +208,16 @@ router.post('/',
       const calculated_income = calculateIncome(rate_type, weightTonsNum, ratePerTonNum, distanceKmNum, fixedAmountNum);
 
       // Auto-create party if consigner_name is provided but no consigner_id
-      let finalConsignerId = consigner_id;
-      if (consignor_name && !consigner_id) {
+      let finalConsignerId = null;  // Default to null, not empty string
+      
+      // Only process consigner if we have a name or valid ID
+      if (consigner_id && consigner_id !== '' && consigner_id !== '0') {
+        finalConsignerId = parseInt(consigner_id, 10) || null;
+      } else if (consignor_name && consignor_name.trim() !== '') {
         // Check if party exists by name
         const existingParty = await query(
           `SELECT id FROM transporters WHERE LOWER(name) = LOWER($1) LIMIT 1`,
-          [consignor_name]
+          [consignor_name.trim()]
         );
         
         if (existingParty.rows.length > 0) {
@@ -222,7 +226,7 @@ router.post('/',
           // Create new party
           const newParty = await query(
             `INSERT INTO transporters (name, opening_balance) VALUES ($1, 0) RETURNING id`,
-            [consignor_name]
+            [consignor_name.trim()]
           );
           finalConsignerId = newParty.rows[0].id;
         }
