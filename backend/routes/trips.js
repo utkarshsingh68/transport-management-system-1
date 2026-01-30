@@ -391,7 +391,10 @@ router.post('/',
 
       res.status(201).json(createdTrip);
     } catch (error) {
-      next(error);
+      console.error('Trip creation error:', error.message);
+      console.error('Error details:', error.detail || 'No details');
+      console.error('Error code:', error.code || 'No code');
+      res.status(400).json({ error: error.message, detail: error.detail });
     }
   }
 );

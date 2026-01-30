@@ -18,7 +18,7 @@ router.get('/search', async (req, res, next) => {
     // Try with consigner_balance join, fallback to simple query
     try {
       const result = await query(`
-        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+        SELECT p.id, p.name, p.phone, p.address,
           COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
           COALESCE(cb.total_freight, 0) as total_freight,
           COALESCE(cb.total_paid, 0) as total_paid
@@ -31,20 +31,22 @@ router.get('/search', async (req, res, next) => {
 
       res.json(result.rows);
     } catch (err) {
-      // Fallback if consigner_balance doesn't exist
+      console.log('Search fallback due to:', err.message);
+      // Fallback - just basic columns
       const result = await query(`
-        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+        SELECT id, name, phone, address,
           0 as outstanding_balance, 0 as total_freight, 0 as total_paid
-        FROM transporters p
-        WHERE LOWER(p.name) LIKE LOWER($1)
-        ORDER BY p.name
+        FROM transporters
+        WHERE LOWER(name) LIKE LOWER($1)
+        ORDER BY name
         LIMIT 10
       `, [`%${name}%`]);
 
       res.json(result.rows);
     }
   } catch (error) {
-    next(error);
+    console.error('Search error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -54,7 +56,7 @@ router.get('/by-name/:name', async (req, res, next) => {
     // Try with consigner_balance join, fallback to simple query
     try {
       const result = await query(`
-        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+        SELECT p.id, p.name, p.phone, p.address,
           COALESCE(cb.outstanding_balance, 0) as outstanding_balance,
           COALESCE(cb.total_freight, 0) as total_freight,
           COALESCE(cb.total_paid, 0) as total_paid
@@ -70,12 +72,13 @@ router.get('/by-name/:name', async (req, res, next) => {
 
       res.json(result.rows[0]);
     } catch (err) {
-      // Fallback if consigner_balance doesn't exist
+      console.log('By-name fallback due to:', err.message);
+      // Fallback - just basic columns
       const result = await query(`
-        SELECT p.id, p.name, p.phone, p.address, p.email, p.gstin,
+        SELECT id, name, phone, address,
           0 as outstanding_balance, 0 as total_freight, 0 as total_paid
-        FROM transporters p
-        WHERE LOWER(p.name) = LOWER($1)
+        FROM transporters
+        WHERE LOWER(name) = LOWER($1)
         LIMIT 1
       `, [req.params.name]);
 
@@ -86,7 +89,8 @@ router.get('/by-name/:name', async (req, res, next) => {
       res.json(result.rows[0]);
     }
   } catch (error) {
-    next(error);
+    console.error('By-name error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
