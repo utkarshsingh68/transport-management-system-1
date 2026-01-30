@@ -12,46 +12,47 @@ router.use(authenticateToken);
 router.get('/summary', async (req, res, next) => {
   try {
     const { start_date, end_date } = req.query;
+    
+    let tripDateFilter = '';
+    let expenseDateFilter = '';
+    let fuelDateFilter = '';
+    let salaryDateFilter = '';
     const params = [];
-    let paramIndex = 1;
-
-    let dateFilter = '';
+    
     if (start_date && end_date) {
-      dateFilter = ` AND date >= $${paramIndex} AND date <= $${paramIndex + 1}`;
       params.push(start_date, end_date);
-      paramIndex += 2;
+      tripDateFilter = ` AND start_date >= $1 AND start_date <= $2`;
+      expenseDateFilter = ` WHERE expense_date >= $1 AND expense_date <= $2`;
+      fuelDateFilter = ` WHERE date >= $1 AND date <= $2`;
+      salaryDateFilter = ` WHERE payment_date >= $1 AND payment_date <= $2`;
     }
 
     // Get total income from trips
     const incomeResult = await query(
       `SELECT COALESCE(SUM(actual_income), 0) as total_income
        FROM trips
-       WHERE status = 'completed'
-       ${dateFilter.replace('date', 'start_date')}`,
+       WHERE status = 'completed' ${tripDateFilter}`,
       params
     );
 
     // Get total expenses
     const expensesResult = await query(
       `SELECT COALESCE(SUM(amount), 0) as total_expenses
-       FROM expenses
-       ${dateFilter.replace('date', 'expense_date')}`,
+       FROM expenses ${expenseDateFilter}`,
       params
     );
 
     // Get total fuel cost
     const fuelResult = await query(
       `SELECT COALESCE(SUM(total_amount), 0) as total_fuel
-       FROM fuel_entries
-       ${dateFilter}`,
+       FROM fuel_entries ${fuelDateFilter}`,
       params
     );
 
     // Get total salary paid
     const salaryResult = await query(
       `SELECT COALESCE(SUM(net_amount), 0) as total_salary
-       FROM salary_payments
-       ${dateFilter.replace('date', 'payment_date')}`,
+       FROM salary_payments ${salaryDateFilter}`,
       params
     );
 
@@ -72,7 +73,8 @@ router.get('/summary', async (req, res, next) => {
       profit_margin: totalIncome > 0 ? ((profit / totalIncome) * 100).toFixed(2) : 0
     });
   } catch (error) {
-    next(error);
+    console.error('Summary error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
