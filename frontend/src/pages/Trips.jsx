@@ -1134,7 +1134,6 @@ const Trips = () => {
                   )}
                 </div>
               )}
-              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
