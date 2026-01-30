@@ -11,15 +11,19 @@ router.use(authenticateToken);
 router.get('/', async (req, res, next) => {
   try {
     const { status } = req.query;
-    let queryText = 'SELECT * FROM trucks';
+    let queryText = `
+      SELECT t.*, d.name as assigned_driver_name 
+      FROM trucks t
+      LEFT JOIN drivers d ON t.assigned_driver_id = d.id
+    `;
     const params = [];
 
     if (status) {
-      queryText += ' WHERE status = $1';
+      queryText += ' WHERE t.status = $1';
       params.push(status);
     }
 
-    queryText += ' ORDER BY truck_number';
+    queryText += ' ORDER BY t.truck_number';
 
     const result = await query(queryText, params);
     res.json(result.rows);
@@ -31,7 +35,12 @@ router.get('/', async (req, res, next) => {
 // Get truck by ID
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await query('SELECT * FROM trucks WHERE id = $1', [req.params.id]);
+    const result = await query(`
+      SELECT t.*, d.name as assigned_driver_name 
+      FROM trucks t
+      LEFT JOIN drivers d ON t.assigned_driver_id = d.id
+      WHERE t.id = $1
+    `, [req.params.id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Truck not found' });
     }
@@ -59,14 +68,14 @@ router.post('/',
 
       const {
         truck_number, truck_type, capacity_tons, model,
-        purchase_date, owner_type, status, notes
+        purchase_date, owner_type, status, notes, assigned_driver_id
       } = req.body;
 
       const result = await query(
-        `INSERT INTO trucks (truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO trucks (truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status, notes, assigned_driver_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status || 'active', notes]
+        [truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status || 'active', notes, assigned_driver_id || null]
       );
 
       res.status(201).json(result.rows[0]);
@@ -83,16 +92,16 @@ router.put('/:id',
     try {
       const {
         truck_number, truck_type, capacity_tons, model,
-        purchase_date, owner_type, status, notes
+        purchase_date, owner_type, status, notes, assigned_driver_id
       } = req.body;
 
       const result = await query(
         `UPDATE trucks 
          SET truck_number = $1, truck_type = $2, capacity_tons = $3, model = $4,
-             purchase_date = $5, owner_type = $6, status = $7, notes = $8
-         WHERE id = $9
+             purchase_date = $5, owner_type = $6, status = $7, notes = $8, assigned_driver_id = $9
+         WHERE id = $10
          RETURNING *`,
-        [truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status, notes, req.params.id]
+        [truck_number, truck_type, capacity_tons, model, purchase_date, owner_type, status, notes, assigned_driver_id || null, req.params.id]
       );
 
       if (result.rows.length === 0) {

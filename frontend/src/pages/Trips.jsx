@@ -62,6 +62,16 @@ const Trips = () => {
     }
   };
 
+  // Handle truck selection - auto-fetch assigned driver
+  const handleTruckChange = (truckId) => {
+    const selectedTruck = trucks.find(t => t.id === parseInt(truckId));
+    setFormData(prev => ({
+      ...prev,
+      truck_id: truckId,
+      driver_id: selectedTruck?.assigned_driver_id ? String(selectedTruck.assigned_driver_id) : prev.driver_id,
+    }));
+  };
+
   const calculateIncome = () => {
     const { rate_type, weight_tons, rate_per_ton, distance_km, fixed_amount } = formData;
     if (rate_type === 'per_ton' && weight_tons && rate_per_ton) {
@@ -506,13 +516,13 @@ const Trips = () => {
                   <select
                     className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
                     value={formData.truck_id}
-                    onChange={(e) => setFormData({ ...formData, truck_id: e.target.value })}
+                    onChange={(e) => handleTruckChange(e.target.value)}
                     required
                   >
                     <option value="">Select Truck</option>
                     {trucks.map((truck) => (
                       <option key={truck.id} value={truck.id}>
-                        {truck.truck_number}
+                        {truck.truck_number} {truck.assigned_driver_name ? `(${truck.assigned_driver_name})` : ''}
                       </option>
                     ))}
                   </select>

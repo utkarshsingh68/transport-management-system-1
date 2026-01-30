@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Search, Truck, Filter, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Truck, Filter, X, User } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
 
 const Trucks = () => {
   const [trucks, setTrucks] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [filteredTrucks, setFilteredTrucks] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -21,30 +22,36 @@ const Trucks = () => {
     owner_type: 'owned',
     status: 'active',
     notes: '',
+    assigned_driver_id: '',
   });
 
   useEffect(() => {
-    fetchTrucks();
+    fetchData();
   }, []);
 
   useEffect(() => {
     const filtered = trucks.filter((truck) => {
       const matchesSearch = truck.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
         truck.truck_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        truck.model?.toLowerCase().includes(searchTerm.toLowerCase());
+        truck.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        truck.assigned_driver_name?.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = filterStatus === 'all' || truck.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
     setFilteredTrucks(filtered);
   }, [searchTerm, trucks, filterStatus]);
 
-  const fetchTrucks = async () => {
+  const fetchData = async () => {
     try {
-      const response = await api.get('/trucks');
-      setTrucks(response.data);
-      setFilteredTrucks(response.data);
+      const [trucksRes, driversRes] = await Promise.all([
+        api.get('/trucks'),
+        api.get('/drivers')
+      ]);
+      setTrucks(trucksRes.data);
+      setFilteredTrucks(trucksRes.data);
+      setDrivers(driversRes.data);
     } catch (error) {
-      toast.error('Failed to fetch trucks');
+      toast.error('Failed to fetch data');
     } finally {
       setLoading(false);
     }
@@ -60,7 +67,7 @@ const Trucks = () => {
         await api.post('/trucks', formData);
         toast.success('Truck created successfully');
       }
-      fetchTrucks();
+      fetchData();
       handleCloseModal();
     } catch (error) {
       toast.error(error.response?.data?.error || 'Operation failed');
@@ -73,7 +80,7 @@ const Trucks = () => {
     try {
       await api.delete(`/trucks/${id}`);
       toast.success('Truck deleted successfully');
-      fetchTrucks();
+      fetchData();
     } catch (error) {
       toast.error('Failed to delete truck');
     }
@@ -90,6 +97,7 @@ const Trucks = () => {
       owner_type: truck.owner_type,
       status: truck.status,
       notes: truck.notes || '',
+      assigned_driver_id: truck.assigned_driver_id || '',
     });
     setShowModal(true);
   };
@@ -106,6 +114,7 @@ const Trucks = () => {
       owner_type: 'owned',
       status: 'active',
       notes: '',
+      assigned_driver_id: '',
     });
   };
 
@@ -234,6 +243,7 @@ const Trucks = () => {
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Type</th>
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Capacity</th>
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Model</th>
+                <th className="text-left py-4 px-6 font-semibold text-slate-700">Assigned Driver</th>
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Owner Type</th>
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Status</th>
                 <th className="text-left py-4 px-6 font-semibold text-slate-700">Actions</th>
@@ -256,6 +266,15 @@ const Trucks = () => {
                   <td className="py-4 px-6 text-slate-600">{truck.truck_type || '-'}</td>
                   <td className="py-4 px-6 text-slate-600">{truck.capacity_tons ? `${truck.capacity_tons} tons` : '-'}</td>
                   <td className="py-4 px-6 text-slate-600">{truck.model || '-'}</td>
+                  <td className="py-4 px-6">
+                    {truck.assigned_driver_name ? (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-700">
+                        {truck.assigned_driver_name}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">Not Assigned</span>
+                    )}
+                  </td>
                   <td className="py-4 px-6">
                     <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium capitalize ${getOwnerBadge(truck.owner_type)}`}>
                       {truck.owner_type}
@@ -288,7 +307,7 @@ const Trucks = () => {
               ))}
               {filteredTrucks.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="py-12 text-center">
+                  <td colSpan="8" className="py-12 text-center">
                     <Truck size={48} className="mx-auto mb-3 text-slate-300" />
                     <p className="text-slate-500">No trucks found</p>
                     <p className="text-slate-400 text-sm mt-1">Try adjusting your search or filter</p>
@@ -398,6 +417,21 @@ const Trucks = () => {
                     <option value="inactive">Inactive</option>
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Assigned Driver</label>
+                <select
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
+                  value={formData.assigned_driver_id}
+                  onChange={(e) => setFormData({ ...formData, assigned_driver_id: e.target.value })}
+                >
+                  <option value="">Select Driver (Optional)</option>
+                  {drivers.filter(d => d.status === 'active').map(driver => (
+                    <option key={driver.id} value={driver.id}>
+                      {driver.name} - {driver.license_number}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
