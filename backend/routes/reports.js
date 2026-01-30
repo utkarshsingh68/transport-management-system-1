@@ -81,13 +81,15 @@ router.get('/monthly', async (req, res, next) => {
   try {
     const { year } = req.query;
     const yearFilter = year ? `AND EXTRACT(YEAR FROM start_date) = $1` : '';
+    const yearFilterExpense = year ? `WHERE EXTRACT(YEAR FROM expense_date) = $1` : '';
+    const yearFilterFuel = year ? `WHERE EXTRACT(YEAR FROM date) = $1` : '';
     const params = year ? [year] : [];
 
     const result = await query(
       `SELECT 
         TO_CHAR(start_date, 'YYYY-MM') as month,
         COUNT(*) as total_trips,
-        SUM(actual_income) as income
+        COALESCE(SUM(actual_income), 0) as income
        FROM trips
        WHERE status = 'completed' ${yearFilter}
        GROUP BY TO_CHAR(start_date, 'YYYY-MM')
@@ -98,9 +100,9 @@ router.get('/monthly', async (req, res, next) => {
     const expensesResult = await query(
       `SELECT 
         TO_CHAR(expense_date, 'YYYY-MM') as month,
-        SUM(amount) as total
+        COALESCE(SUM(amount), 0) as total
        FROM expenses
-       ${yearFilter.replace('start_date', 'expense_date')}
+       ${yearFilterExpense}
        GROUP BY TO_CHAR(expense_date, 'YYYY-MM')`,
       params
     );
@@ -108,9 +110,9 @@ router.get('/monthly', async (req, res, next) => {
     const fuelResult = await query(
       `SELECT 
         TO_CHAR(date, 'YYYY-MM') as month,
-        SUM(total_amount) as total
+        COALESCE(SUM(total_amount), 0) as total
        FROM fuel_entries
-       ${yearFilter.replace('start_date', 'date')}
+       ${yearFilterFuel}
        GROUP BY TO_CHAR(date, 'YYYY-MM')`,
       params
     );
