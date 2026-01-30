@@ -21,6 +21,8 @@ import salaryRoutes from './routes/salary.js';
 import ledgerRoutes from './routes/ledger.js';
 import pnlRoutes from './routes/pnl.js';
 import documentsRoutes from './routes/documents.js';
+import paymentsRoutes from './routes/payments.js';
+import consignerLedgerRoutes from './routes/consignerLedger.js';
 
 dotenv.config();
 
@@ -71,6 +73,8 @@ app.use('/api/salary', salaryRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/pnl', pnlRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/consigner-ledger', consignerLedgerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

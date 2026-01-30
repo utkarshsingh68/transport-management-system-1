@@ -11,7 +11,8 @@
     "migrate-trip-money": "node scripts/migrateTripMoneyFields.js",
     "migrate-trip-spend-expenses": "node scripts/migrateTripSpendExpenses.js",
     "migrate-documents": "node scripts/migrateDocuments.js",
-    "migrate-driver-assignment": "node scripts/migrateDriverAssignment.js"
+    "migrate-driver-assignment": "node scripts/migrateDriverAssignment.js",
+    "migrate-payment-system": "node scripts/migratePaymentSystem.js"
   },
   "dependencies": {
     "express": "^4.18.2",

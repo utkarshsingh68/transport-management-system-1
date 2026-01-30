@@ -93,12 +93,13 @@ const calculateIncome = (rateType, weightTons, ratePerTon, distanceKm, fixedAmou
 // Get all trips
 router.get('/', async (req, res, next) => {
   try {
-    const { truck_id, driver_id, status, start_date, end_date } = req.query;
+    const { truck_id, driver_id, status, start_date, end_date, payment_status } = req.query;
     let queryText = `
-      SELECT t.*, tr.truck_number, d.name as driver_name
+      SELECT t.*, tr.truck_number, d.name as driver_name, p.name as consigner_name
       FROM trips t
       LEFT JOIN trucks tr ON t.truck_id = tr.id
       LEFT JOIN drivers d ON t.driver_id = d.id
+      LEFT JOIN parties p ON t.consigner_id = p.id
       WHERE 1=1
     `;
     const params = [];
@@ -119,6 +120,12 @@ router.get('/', async (req, res, next) => {
     if (status) {
       queryText += ` AND t.status = $${paramIndex}`;
       params.push(status);
+      paramIndex++;
+    }
+
+    if (payment_status) {
+      queryText += ` AND t.payment_status = $${paramIndex}`;
+      params.push(payment_status);
       paramIndex++;
     }
 
@@ -185,7 +192,8 @@ router.post('/',
         trip_number, truck_id, driver_id, from_location, to_location,
         start_date, end_date, distance_km, weight_tons, rate_per_ton,
         rate_type, fixed_amount, actual_income, driver_advance_amount, trip_spent_amount, consignor_name,
-        consignee_name, lr_number, status, notes
+        consignee_name, lr_number, status, notes,
+        freight_amount, payment_due_date, consigner_id
       } = req.body;
 
       const distanceKmNum = toNullableNumber(distance_km);
@@ -195,6 +203,7 @@ router.post('/',
       const actualIncomeNum = toNullableNumber(actual_income);
       const driverAdvanceAmountNum = toMoneyNumber(driver_advance_amount);
       const tripSpentAmountNum = toMoneyNumber(trip_spent_amount);
+      const freightAmountNum = toMoneyNumber(freight_amount);
 
       const calculated_income = calculateIncome(rate_type, weightTonsNum, ratePerTonNum, distanceKmNum, fixedAmountNum);
 
@@ -204,19 +213,57 @@ router.post('/',
           start_date, end_date, distance_km, weight_tons, rate_per_ton,
           rate_type, fixed_amount, calculated_income, actual_income,
           driver_advance_amount, trip_spent_amount,
-          consignor_name, consignee_name, lr_number, status, notes, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          consignor_name, consignee_name, lr_number, status, notes, created_by,
+          freight_amount, amount_due, payment_status, payment_due_date, consigner_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
         RETURNING *`,
         [
           trip_number, truck_id, driver_id, from_location, to_location,
           start_date, end_date, distanceKmNum, weightTonsNum, ratePerTonNum,
           rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
           driverAdvanceAmountNum, tripSpentAmountNum,
-          consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id
+          consignor_name, consignee_name, lr_number, status || 'planned', notes, req.user.id,
+          freightAmountNum, freightAmountNum, 'pending', payment_due_date || null, consigner_id || null
         ]
       );
 
       const createdTrip = result.rows[0];
+      
+      // Update consigner ledger if freight amount and consigner are set
+      if (freightAmountNum > 0 && consigner_id) {
+        // Get current balance
+        const balanceResult = await query(
+          'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
+          [consigner_id]
+        );
+
+        let currentBalance = balanceResult.rows.length > 0 
+          ? parseFloat(balanceResult.rows[0].outstanding_balance) 
+          : 0;
+        const newBalance = currentBalance + freightAmountNum;
+
+        // Record in ledger
+        await query(
+          `INSERT INTO consigner_ledger (consigner_id, trip_id, transaction_type, amount, balance_after, description, transaction_date, created_by)
+           VALUES ($1, $2, 'credit', $3, $4, $5, $6, $7)`,
+          [consigner_id, createdTrip.id, freightAmountNum, newBalance, `New trip: ${trip_number} (${from_location} → ${to_location})`, start_date, req.user.id]
+        );
+
+        // Update/Insert consigner balance
+        await query(
+          `INSERT INTO consigner_balance (consigner_id, outstanding_balance, total_trips, total_freight, last_trip_date)
+           VALUES ($1, $2, 1, $3, $4)
+           ON CONFLICT (consigner_id) 
+           DO UPDATE SET 
+             outstanding_balance = $2,
+             total_trips = consigner_balance.total_trips + 1,
+             total_freight = consigner_balance.total_freight + $3,
+             last_trip_date = $4,
+             updated_at = CURRENT_TIMESTAMP`,
+          [consigner_id, newBalance, freightAmountNum, start_date]
+        );
+      }
+      
       await syncTripSpentExpense({
         tripId: createdTrip.id,
         truckId: createdTrip.truck_id,
@@ -241,7 +288,8 @@ router.put('/:id',
         trip_number, truck_id, driver_id, from_location, to_location,
         start_date, end_date, distance_km, weight_tons, rate_per_ton,
         rate_type, fixed_amount, actual_income, driver_advance_amount, trip_spent_amount, consignor_name,
-        consignee_name, lr_number, status, notes
+        consignee_name, lr_number, status, notes,
+        freight_amount, payment_due_date, consigner_id
       } = req.body;
 
       const distanceKmNum = toNullableNumber(distance_km);
@@ -251,8 +299,16 @@ router.put('/:id',
       const actualIncomeNum = toNullableNumber(actual_income);
       const driverAdvanceAmountNum = toMoneyNumber(driver_advance_amount);
       const tripSpentAmountNum = toMoneyNumber(trip_spent_amount);
+      const freightAmountNum = toMoneyNumber(freight_amount);
 
       const calculated_income = calculateIncome(rate_type, weightTonsNum, ratePerTonNum, distanceKmNum, fixedAmountNum);
+
+      // Get existing trip to check for freight/consigner changes
+      const existingTrip = await query('SELECT * FROM trips WHERE id = $1', [req.params.id]);
+      if (existingTrip.rows.length === 0) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
+      const oldTrip = existingTrip.rows[0];
 
       const result = await query(
         `UPDATE trips SET
@@ -260,7 +316,9 @@ router.put('/:id',
           start_date = $6, end_date = $7, distance_km = $8, weight_tons = $9, rate_per_ton = $10,
           rate_type = $11, fixed_amount = $12, calculated_income = $13, actual_income = $14,
           driver_advance_amount = $15, trip_spent_amount = $16,
-          consignor_name = $17, consignee_name = $18, lr_number = $19, status = $20, notes = $21
+          consignor_name = $17, consignee_name = $18, lr_number = $19, status = $20, notes = $21,
+          freight_amount = $23, payment_due_date = $24, consigner_id = $25,
+          amount_due = CASE WHEN $23 != COALESCE(freight_amount, 0) THEN $23 - COALESCE(amount_paid, 0) ELSE amount_due END
         WHERE id = $22
         RETURNING *`,
         [
@@ -268,15 +326,70 @@ router.put('/:id',
           start_date, end_date, distanceKmNum, weightTonsNum, ratePerTonNum,
           rate_type, fixedAmountNum, calculated_income, actualIncomeNum ?? calculated_income,
           driverAdvanceAmountNum, tripSpentAmountNum,
-          consignor_name, consignee_name, lr_number, status, notes, req.params.id
+          consignor_name, consignee_name, lr_number, status, notes, req.params.id,
+          freightAmountNum, payment_due_date || null, consigner_id || null
         ]
       );
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Trip not found' });
+      const updatedTrip = result.rows[0];
+
+      // Handle consigner ledger updates if freight or consigner changed
+      const oldFreight = parseFloat(oldTrip.freight_amount) || 0;
+      const oldConsignerId = oldTrip.consigner_id;
+      
+      if (oldConsignerId !== consigner_id || oldFreight !== freightAmountNum) {
+        // If old consigner exists, reverse the old entry
+        if (oldConsignerId && oldFreight > 0) {
+          const oldBalanceResult = await query(
+            'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
+            [oldConsignerId]
+          );
+          if (oldBalanceResult.rows.length > 0) {
+            const newOldBalance = parseFloat(oldBalanceResult.rows[0].outstanding_balance) - oldFreight;
+            await query(
+              `UPDATE consigner_balance SET outstanding_balance = $1, total_freight = total_freight - $2, total_trips = total_trips - 1, updated_at = CURRENT_TIMESTAMP WHERE consigner_id = $3`,
+              [newOldBalance, oldFreight, oldConsignerId]
+            );
+            await query(
+              `INSERT INTO consigner_ledger (consigner_id, trip_id, transaction_type, amount, balance_after, description, created_by)
+               VALUES ($1, $2, 'adjustment', $3, $4, $5, $6)`,
+              [oldConsignerId, req.params.id, -oldFreight, newOldBalance, `Trip updated/removed: ${oldTrip.trip_number}`, req.user.id]
+            );
+          }
+        }
+
+        // Add new consigner entry if applicable
+        if (consigner_id && freightAmountNum > 0) {
+          const newBalanceResult = await query(
+            'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
+            [consigner_id]
+          );
+          let currentBalance = newBalanceResult.rows.length > 0 
+            ? parseFloat(newBalanceResult.rows[0].outstanding_balance) 
+            : 0;
+          const newBalance = currentBalance + freightAmountNum;
+
+          await query(
+            `INSERT INTO consigner_ledger (consigner_id, trip_id, transaction_type, amount, balance_after, description, created_by)
+             VALUES ($1, $2, 'credit', $3, $4, $5, $6)`,
+            [consigner_id, req.params.id, freightAmountNum, newBalance, `Trip: ${trip_number} (${from_location} → ${to_location})`, req.user.id]
+          );
+
+          await query(
+            `INSERT INTO consigner_balance (consigner_id, outstanding_balance, total_trips, total_freight, last_trip_date)
+             VALUES ($1, $2, 1, $3, $4)
+             ON CONFLICT (consigner_id) 
+             DO UPDATE SET 
+               outstanding_balance = $2,
+               total_trips = consigner_balance.total_trips + 1,
+               total_freight = consigner_balance.total_freight + $3,
+               last_trip_date = $4,
+               updated_at = CURRENT_TIMESTAMP`,
+            [consigner_id, newBalance, freightAmountNum, start_date]
+          );
+        }
       }
 
-      const updatedTrip = result.rows[0];
       await syncTripSpentExpense({
         tripId: updatedTrip.id,
         truckId: updatedTrip.truck_id,

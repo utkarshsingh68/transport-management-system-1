@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { Plus, Edit2, Trash2, MapPin, Search, X, TruckIcon, Calendar, Route, ChevronLeft, ChevronRight, Download, CreditCard, AlertCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
 
@@ -7,6 +7,7 @@ const Trips = () => {
   const [trips, setTrips] = useState([]);
   const [trucks, setTrucks] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [parties, setParties] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingTrip, setEditingTrip] = useState(null);
   const [filterStatus, setFilterStatus] = useState('');
@@ -37,6 +38,9 @@ const Trips = () => {
     lr_number: '',
     status: 'planned',
     notes: '',
+    freight_amount: '',
+    payment_due_date: '',
+    consigner_id: '',
   });
 
   useEffect(() => {
@@ -47,14 +51,16 @@ const Trips = () => {
     try {
       setLoading(true);
       const params = filterStatus ? { status: filterStatus } : {};
-      const [tripsRes, trucksRes, driversRes] = await Promise.all([
+      const [tripsRes, trucksRes, driversRes, partiesRes] = await Promise.all([
         api.get('/trips', { params }),
         api.get('/trucks'),
         api.get('/drivers'),
+        api.get('/parties'),
       ]);
       setTrips(tripsRes.data);
       setTrucks(trucksRes.data);
       setDrivers(driversRes.data);
+      setParties(partiesRes.data.filter(p => p.type === 'consigner' || p.type === 'both'));
     } catch (error) {
       toast.error('Failed to fetch data');
     } finally {
@@ -134,6 +140,9 @@ const Trips = () => {
       lr_number: trip.lr_number || '',
       status: trip.status,
       notes: trip.notes || '',
+      freight_amount: trip.freight_amount || '',
+      payment_due_date: trip.payment_due_date?.split('T')[0] || '',
+      consigner_id: trip.consigner_id || '',
     });
     setShowModal(true);
   };
@@ -161,6 +170,9 @@ const Trips = () => {
       lr_number: '',
       status: 'planned',
       notes: '',
+      freight_amount: '',
+      payment_due_date: '',
+      consigner_id: '',
     });
   };
 
@@ -316,10 +328,8 @@ const Trips = () => {
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Route</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Income</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Advance</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spent</th>
-                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Balance</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Freight</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Payment</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -327,7 +337,7 @@ const Trips = () => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="11" className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan="9" className="px-6 py-12 text-center text-slate-500">
                     <div className="flex items-center justify-center gap-2">
                       <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                       Loading trips...
@@ -351,6 +361,9 @@ const Trips = () => {
                   <tr key={trip.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
                     <td className="px-6 py-4">
                       <span className="font-semibold text-slate-900">{trip.trip_number}</span>
+                      {trip.consigner_name && (
+                        <p className="text-xs text-slate-500">{trip.consigner_name}</p>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -371,16 +384,31 @@ const Trips = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-slate-600">{new Date(trip.start_date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 font-semibold text-green-600">₹{trip.actual_income?.toLocaleString('en-IN') || 0}</td>
-                    <td className="px-6 py-4 font-medium text-blue-600">₹{advance.toLocaleString('en-IN')}</td>
-                    <td className="px-6 py-4 font-medium text-orange-600">₹{spent.toLocaleString('en-IN')}</td>
                     <td className="px-6 py-4">
-                      <span className={`font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {balance >= 0 ? '' : '-'}₹{Math.abs(balance).toLocaleString('en-IN')}
+                      <span className="font-semibold text-slate-900">₹{(trip.freight_amount || 0).toLocaleString('en-IN')}</span>
+                      {trip.amount_paid > 0 && (
+                        <p className="text-xs text-green-600">Paid: ₹{trip.amount_paid?.toLocaleString('en-IN')}</p>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full ring-1 ${
+                          trip.payment_status === 'completed'
+                            ? 'bg-green-50 text-green-700 ring-green-600/20'
+                            : trip.payment_status === 'partial'
+                            ? 'bg-blue-50 text-blue-700 ring-blue-600/20'
+                            : trip.payment_status === 'overdue'
+                            ? 'bg-red-50 text-red-700 ring-red-600/20'
+                            : 'bg-amber-50 text-amber-700 ring-amber-600/20'
+                        }`}
+                      >
+                        {trip.payment_status === 'completed' ? '✓ Paid' :
+                         trip.payment_status === 'partial' ? '◐ Partial' :
+                         trip.payment_status === 'overdue' ? '⚠ Overdue' : '○ Pending'}
                       </span>
-                      <p className="text-xs text-slate-400">
-                        {balance > 0 ? 'To return' : balance < 0 ? 'Overspent' : 'Settled'}
-                      </p>
+                      {trip.amount_due > 0 && trip.payment_status !== 'completed' && (
+                        <p className="text-xs text-red-600 mt-1">Due: ₹{trip.amount_due?.toLocaleString('en-IN')}</p>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <span
@@ -753,6 +781,57 @@ const Trips = () => {
                     placeholder="e.g., LR-001"
                   />
                 </div>
+              </div>
+
+              {/* Payment Section */}
+              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                <h4 className="font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                  <CreditCard size={18} />
+                  Payment Details
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Consigner (Party)</label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
+                      value={formData.consigner_id}
+                      onChange={(e) => setFormData({ ...formData, consigner_id: e.target.value })}
+                    >
+                      <option value="">Select Consigner</option>
+                      {parties.map((party) => (
+                        <option key={party.id} value={party.id}>
+                          {party.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Freight Amount (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      value={formData.freight_amount}
+                      onChange={(e) => setFormData({ ...formData, freight_amount: e.target.value })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Payment Due Date</label>
+                    <input
+                      type="date"
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      value={formData.payment_due_date}
+                      onChange={(e) => setFormData({ ...formData, payment_due_date: e.target.value })}
+                    />
+                  </div>
+                </div>
+                {formData.consigner_id && formData.freight_amount && (
+                  <p className="text-xs text-amber-700 mt-2 flex items-center gap-1">
+                    <AlertCircle size={14} />
+                    This amount will be added to consigner's udhari (credit ledger)
+                  </p>
+                )}
               </div>
 
               <div>

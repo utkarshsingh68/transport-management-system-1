@@ -19,6 +19,7 @@ import {
   Search,
   Sparkles,
   FileText,
+  CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -41,6 +42,7 @@ const Layout = () => {
     { name: 'Fuel', href: '/fuel', icon: Fuel, color: 'from-orange-500 to-red-500' },
     { name: 'Expenses', href: '/expenses', icon: Receipt, color: 'from-rose-500 to-pink-600' },
     { name: 'Parties', href: '/parties', icon: Building2, color: 'from-cyan-500 to-blue-600' },
+    { name: 'Payments', href: '/payments', icon: CreditCard, color: 'from-green-500 to-teal-600' },
     { name: 'Salary', href: '/salary', icon: Wallet, color: 'from-teal-500 to-emerald-600' },
     { name: 'Ledger', href: '/ledger', icon: BookOpen, color: 'from-indigo-500 to-violet-600' },
     { name: 'Documents', href: '/documents', icon: FileText, color: 'from-sky-500 to-cyan-600' },
