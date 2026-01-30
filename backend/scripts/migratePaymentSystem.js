@@ -29,7 +29,7 @@ const migrate = async () => {
       { name: 'amount_paid', type: 'DECIMAL(12,2) DEFAULT 0' },
       { name: 'amount_due', type: 'DECIMAL(12,2) DEFAULT 0' },
       { name: 'payment_due_date', type: 'DATE' },
-      { name: 'consigner_id', type: 'INTEGER REFERENCES parties(id) ON DELETE SET NULL' },
+      { name: 'consigner_id', type: 'INTEGER REFERENCES transporters(id) ON DELETE SET NULL' },
     ];
 
     for (const field of paymentFields) {
@@ -70,7 +70,7 @@ const migrate = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS consigner_ledger (
         id SERIAL PRIMARY KEY,
-        consigner_id INTEGER REFERENCES parties(id) ON DELETE CASCADE,
+        consigner_id INTEGER REFERENCES transporters(id) ON DELETE CASCADE,
         trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL,
         transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('credit', 'debit', 'adjustment')),
         amount DECIMAL(12,2) NOT NULL,
@@ -89,7 +89,7 @@ const migrate = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS consigner_balance (
         id SERIAL PRIMARY KEY,
-        consigner_id INTEGER UNIQUE REFERENCES parties(id) ON DELETE CASCADE,
+        consigner_id INTEGER UNIQUE REFERENCES transporters(id) ON DELETE CASCADE,
         outstanding_balance DECIMAL(12,2) DEFAULT 0,
         total_trips INTEGER DEFAULT 0,
         total_freight DECIMAL(12,2) DEFAULT 0,
