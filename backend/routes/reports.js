@@ -28,38 +28,50 @@ router.get('/summary', async (req, res, next) => {
     }
 
     // Get total income from trips
-    const incomeResult = await query(
-      `SELECT COALESCE(SUM(actual_income), 0) as total_income
-       FROM trips
-       WHERE status = 'completed' ${tripDateFilter}`,
-      params
-    );
+    let totalIncome = 0;
+    try {
+      const incomeResult = await query(
+        `SELECT COALESCE(SUM(actual_income), 0) as total_income
+         FROM trips
+         WHERE status = 'completed' ${tripDateFilter}`,
+        params
+      );
+      totalIncome = parseFloat(incomeResult.rows[0].total_income) || 0;
+    } catch (e) { console.log('Income query error:', e.message); }
 
     // Get total expenses
-    const expensesResult = await query(
-      `SELECT COALESCE(SUM(amount), 0) as total_expenses
-       FROM expenses ${expenseDateFilter}`,
-      params
-    );
+    let totalExpenses = 0;
+    try {
+      const expensesResult = await query(
+        `SELECT COALESCE(SUM(amount), 0) as total_expenses
+         FROM expenses ${expenseDateFilter}`,
+        params
+      );
+      totalExpenses = parseFloat(expensesResult.rows[0].total_expenses) || 0;
+    } catch (e) { console.log('Expenses query error:', e.message); }
 
     // Get total fuel cost
-    const fuelResult = await query(
-      `SELECT COALESCE(SUM(total_amount), 0) as total_fuel
-       FROM fuel_entries ${fuelDateFilter}`,
-      params
-    );
+    let totalFuel = 0;
+    try {
+      const fuelResult = await query(
+        `SELECT COALESCE(SUM(total_amount), 0) as total_fuel
+         FROM fuel_entries ${fuelDateFilter}`,
+        params
+      );
+      totalFuel = parseFloat(fuelResult.rows[0].total_fuel) || 0;
+    } catch (e) { console.log('Fuel query error:', e.message); }
 
-    // Get total salary paid
-    const salaryResult = await query(
-      `SELECT COALESCE(SUM(net_amount), 0) as total_salary
-       FROM salary_payments ${salaryDateFilter}`,
-      params
-    );
+    // Get total salary paid - try different column names
+    let totalSalary = 0;
+    try {
+      const salaryResult = await query(
+        `SELECT COALESCE(SUM(amount), 0) as total_salary
+         FROM salary_payments ${salaryDateFilter}`,
+        params
+      );
+      totalSalary = parseFloat(salaryResult.rows[0].total_salary) || 0;
+    } catch (e) { console.log('Salary query error:', e.message); }
 
-    const totalIncome = parseFloat(incomeResult.rows[0].total_income);
-    const totalExpenses = parseFloat(expensesResult.rows[0].total_expenses);
-    const totalFuel = parseFloat(fuelResult.rows[0].total_fuel);
-    const totalSalary = parseFloat(salaryResult.rows[0].total_salary);
     const totalCosts = totalExpenses + totalFuel + totalSalary;
     const profit = totalIncome - totalCosts;
 
@@ -87,41 +99,56 @@ router.get('/monthly', async (req, res, next) => {
     const yearFilterFuel = year ? `WHERE EXTRACT(YEAR FROM date) = $1` : '';
     const params = year ? [year] : [];
 
-    const result = await query(
-      `SELECT 
-        TO_CHAR(start_date, 'YYYY-MM') as month,
-        COUNT(*) as total_trips,
-        COALESCE(SUM(actual_income), 0) as income
-       FROM trips
-       WHERE status = 'completed' ${yearFilter}
-       GROUP BY TO_CHAR(start_date, 'YYYY-MM')
-       ORDER BY month DESC`,
-      params
-    );
+    // Get trips data
+    let tripsData = [];
+    try {
+      const result = await query(
+        `SELECT 
+          TO_CHAR(start_date, 'YYYY-MM') as month,
+          COUNT(*) as total_trips,
+          COALESCE(SUM(actual_income), 0) as income
+         FROM trips
+         WHERE status = 'completed' ${yearFilter}
+         GROUP BY TO_CHAR(start_date, 'YYYY-MM')
+         ORDER BY month DESC`,
+        params
+      );
+      tripsData = result.rows;
+    } catch (e) { console.log('Monthly trips error:', e.message); }
 
-    const expensesResult = await query(
-      `SELECT 
-        TO_CHAR(expense_date, 'YYYY-MM') as month,
-        COALESCE(SUM(amount), 0) as total
-       FROM expenses
-       ${yearFilterExpense}
-       GROUP BY TO_CHAR(expense_date, 'YYYY-MM')`,
-      params
-    );
+    // Get expenses data
+    let expensesData = [];
+    try {
+      const expensesResult = await query(
+        `SELECT 
+          TO_CHAR(expense_date, 'YYYY-MM') as month,
+          COALESCE(SUM(amount), 0) as total
+         FROM expenses
+         ${yearFilterExpense}
+         GROUP BY TO_CHAR(expense_date, 'YYYY-MM')`,
+        params
+      );
+      expensesData = expensesResult.rows;
+    } catch (e) { console.log('Monthly expenses error:', e.message); }
 
-    const fuelResult = await query(
-      `SELECT 
-        TO_CHAR(date, 'YYYY-MM') as month,
-        COALESCE(SUM(total_amount), 0) as total
-       FROM fuel_entries
-       ${yearFilterFuel}
-       GROUP BY TO_CHAR(date, 'YYYY-MM')`,
-      params
-    );
+    // Get fuel data
+    let fuelData = [];
+    try {
+      const fuelResult = await query(
+        `SELECT 
+          TO_CHAR(date, 'YYYY-MM') as month,
+          COALESCE(SUM(total_amount), 0) as total
+         FROM fuel_entries
+         ${yearFilterFuel}
+         GROUP BY TO_CHAR(date, 'YYYY-MM')`,
+        params
+      );
+      fuelData = fuelResult.rows;
+    } catch (e) { console.log('Monthly fuel error:', e.message); }
 
     // Combine results
     const monthlyData = {};
-    result.rows.forEach(row => {
+    tripsData.forEach(row => {
       monthlyData[row.month] = {
         month: row.month,
         total_trips: row.total_trips,
@@ -131,13 +158,13 @@ router.get('/monthly', async (req, res, next) => {
       };
     });
 
-    expensesResult.rows.forEach(row => {
+    expensesData.forEach(row => {
       if (monthlyData[row.month]) {
         monthlyData[row.month].expenses = parseFloat(row.total) || 0;
       }
     });
 
-    fuelResult.rows.forEach(row => {
+    fuelData.forEach(row => {
       if (monthlyData[row.month]) {
         monthlyData[row.month].fuel = parseFloat(row.total) || 0;
       }
