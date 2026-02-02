@@ -72,6 +72,33 @@ router.get('/summary', async (req, res, next) => {
       totalSalary = parseFloat(salaryResult.rows[0].total_salary) || 0;
     } catch (e) { console.log('Salary query error:', e.message); }
 
+    // Get active trucks count
+    let activeTrucks = 0;
+    try {
+      const trucksResult = await query(`SELECT COUNT(*) as count FROM trucks WHERE status = 'active' OR status IS NULL`);
+      activeTrucks = parseInt(trucksResult.rows[0].count) || 0;
+    } catch (e) { 
+      // Try without status filter
+      try {
+        const trucksResult = await query(`SELECT COUNT(*) as count FROM trucks`);
+        activeTrucks = parseInt(trucksResult.rows[0].count) || 0;
+      } catch (e2) { console.log('Trucks count error:', e2.message); }
+    }
+
+    // Get active trips count
+    let activeTrips = 0;
+    try {
+      const tripsResult = await query(`SELECT COUNT(*) as count FROM trips WHERE status = 'in_progress' OR status = 'planned'`);
+      activeTrips = parseInt(tripsResult.rows[0].count) || 0;
+    } catch (e) { console.log('Active trips error:', e.message); }
+
+    // Get total drivers count
+    let totalDrivers = 0;
+    try {
+      const driversResult = await query(`SELECT COUNT(*) as count FROM drivers`);
+      totalDrivers = parseInt(driversResult.rows[0].count) || 0;
+    } catch (e) { console.log('Drivers count error:', e.message); }
+
     const totalCosts = totalExpenses + totalFuel + totalSalary;
     const profit = totalIncome - totalCosts;
 
@@ -82,7 +109,10 @@ router.get('/summary', async (req, res, next) => {
       total_salary: totalSalary,
       total_costs: totalCosts,
       profit: profit,
-      profit_margin: totalIncome > 0 ? ((profit / totalIncome) * 100).toFixed(2) : 0
+      profit_margin: totalIncome > 0 ? ((profit / totalIncome) * 100).toFixed(2) : 0,
+      active_trucks: activeTrucks,
+      active_trips: activeTrips,
+      total_drivers: totalDrivers
     });
   } catch (error) {
     console.error('Summary error:', error.message);
