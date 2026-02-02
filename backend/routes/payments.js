@@ -17,7 +17,7 @@ router.get('/', async (req, res, next) => {
              p.name as consigner_name
       FROM trip_payments tp
       JOIN trips t ON tp.trip_id = t.id
-      LEFT JOIN parties p ON t.consigner_id = p.id
+      LEFT JOIN transporters p ON t.consigner_id = p.id
       WHERE 1=1
     `;
     const params = [];
@@ -202,7 +202,7 @@ router.get('/pending', async (req, res, next) => {
                ELSE 'normal'
              END as urgency
       FROM trips t
-      LEFT JOIN parties p ON t.consigner_id = p.id
+      LEFT JOIN transporters p ON t.consigner_id = p.id
       LEFT JOIN trucks tr ON t.truck_id = tr.id
       LEFT JOIN drivers d ON t.driver_id = d.id
       WHERE t.payment_status IN ('pending', 'partial', 'overdue')
