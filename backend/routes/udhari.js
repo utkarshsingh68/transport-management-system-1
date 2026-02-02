@@ -138,10 +138,8 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
 router.post('/payment',
   authorizeRoles('admin', 'manager', 'accountant'),
   [
-    body('trip_id').isInt(),
-    body('consigner_id').isInt(),
-    body('amount').isDecimal({ min: 0.01 }),
-    body('payment_date').isDate(),
+    body('trip_id').notEmpty(),
+    body('amount').notEmpty(),
   ],
   async (req, res, next) => {
     try {
@@ -188,13 +186,14 @@ router.post('/payment',
         console.log('trip_payments insert error:', err.message);
       }
 
-      // Update consigner ledger
-      try {
-        // Get current balance
-        const balanceResult = await query(
-          'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
-          [consigner_id]
-        );
+      // Update consigner ledger - only if consigner_id is valid
+      if (consigner_id && consigner_id > 0) {
+        try {
+          // Get current balance
+          const balanceResult = await query(
+            'SELECT outstanding_balance FROM consigner_balance WHERE consigner_id = $1',
+            [consigner_id]
+          );
 
         const currentBalance = balanceResult.rows.length > 0 
           ? parseFloat(balanceResult.rows[0].outstanding_balance) 
@@ -216,10 +215,11 @@ router.post('/payment',
               last_payment_date = $2,
               last_updated = CURRENT_TIMESTAMP
           WHERE consigner_id = $3
-        `, [paymentAmount, payment_date, consigner_id]);
+        `, [paymentAmount, payment_date || new Date().toISOString().split('T')[0], consigner_id]);
 
-      } catch (err) {
-        console.log('Ledger update error:', err.message);
+        } catch (err) {
+          console.log('Ledger update error:', err.message);
+        }
       }
 
       res.json({ 
