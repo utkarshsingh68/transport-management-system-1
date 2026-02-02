@@ -10,22 +10,22 @@ router.use(authenticateToken);
 // Get all parties with outstanding udhari
 router.get('/', async (req, res, next) => {
   try {
-    // Get all consigners with pending dues from trips
+    // Get all trips with pending dues - group by consigner name or ID
     const result = await query(`
       SELECT 
-        p.id,
-        p.name,
+        COALESCE(p.id, 0) as id,
+        COALESCE(p.name, t.consignor_name, 'Unknown Party') as name,
         p.phone,
         p.address,
         COUNT(t.id) as pending_trips,
         COALESCE(SUM(t.amount_due), 0) as total_due,
         MIN(t.start_date) as oldest_trip_date,
         MAX(t.start_date) as latest_trip_date
-      FROM transporters p
-      INNER JOIN trips t ON t.consigner_id = p.id
+      FROM trips t
+      LEFT JOIN transporters p ON t.consigner_id = p.id
       WHERE t.amount_due > 0 
         AND t.payment_status IN ('pending', 'partial', 'overdue')
-      GROUP BY p.id, p.name, p.phone, p.address
+      GROUP BY COALESCE(p.id, 0), COALESCE(p.name, t.consignor_name, 'Unknown Party'), p.phone, p.address
       HAVING SUM(t.amount_due) > 0
       ORDER BY total_due DESC
     `);
@@ -58,34 +58,69 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
   try {
     const { partyId } = req.params;
 
-    const result = await query(`
-      SELECT 
-        t.id,
-        t.trip_number,
-        t.from_location,
-        t.to_location,
-        t.start_date,
-        t.freight_amount,
-        t.amount_paid,
-        t.amount_due,
-        t.payment_status,
-        t.payment_due_date,
-        t.consigner_id,
-        tr.truck_number,
-        d.name as driver_name,
-        CASE 
-          WHEN t.amount_paid = 0 THEN 'Payment Left with Party'
-          WHEN t.amount_paid > 0 AND t.amount_due > 0 THEN 'Partial Payment'
-          ELSE 'Pending'
-        END as udhari_reason
-      FROM trips t
-      LEFT JOIN trucks tr ON t.truck_id = tr.id
-      LEFT JOIN drivers d ON t.driver_id = d.id
-      WHERE t.consigner_id = $1
-        AND t.amount_due > 0
-        AND t.payment_status IN ('pending', 'partial', 'overdue')
-      ORDER BY t.start_date DESC
-    `, [partyId]);
+    let result;
+    if (partyId === '0' || partyId === 'null') {
+      // Get trips without consigner_id
+      result = await query(`
+        SELECT 
+          t.id,
+          t.trip_number,
+          t.from_location,
+          t.to_location,
+          t.start_date,
+          t.freight_amount,
+          t.amount_paid,
+          t.amount_due,
+          t.payment_status,
+          t.payment_due_date,
+          t.consigner_id,
+          t.consignor_name,
+          tr.truck_number,
+          d.name as driver_name,
+          CASE 
+            WHEN t.amount_paid = 0 THEN 'Payment Left with Party'
+            WHEN t.amount_paid > 0 AND t.amount_due > 0 THEN 'Partial Payment'
+            ELSE 'Pending'
+          END as udhari_reason
+        FROM trips t
+        LEFT JOIN trucks tr ON t.truck_id = tr.id
+        LEFT JOIN drivers d ON t.driver_id = d.id
+        WHERE t.consigner_id IS NULL
+          AND t.amount_due > 0
+          AND t.payment_status IN ('pending', 'partial', 'overdue')
+        ORDER BY t.start_date DESC
+      `);
+    } else {
+      result = await query(`
+        SELECT 
+          t.id,
+          t.trip_number,
+          t.from_location,
+          t.to_location,
+          t.start_date,
+          t.freight_amount,
+          t.amount_paid,
+          t.amount_due,
+          t.payment_status,
+          t.payment_due_date,
+          t.consigner_id,
+          t.consignor_name,
+          tr.truck_number,
+          d.name as driver_name,
+          CASE 
+            WHEN t.amount_paid = 0 THEN 'Payment Left with Party'
+            WHEN t.amount_paid > 0 AND t.amount_due > 0 THEN 'Partial Payment'
+            ELSE 'Pending'
+          END as udhari_reason
+        FROM trips t
+        LEFT JOIN trucks tr ON t.truck_id = tr.id
+        LEFT JOIN drivers d ON t.driver_id = d.id
+        WHERE t.consigner_id = $1
+          AND t.amount_due > 0
+          AND t.payment_status IN ('pending', 'partial', 'overdue')
+        ORDER BY t.start_date DESC
+      `, [partyId]);
+    }
 
     res.json(result.rows.map(row => ({
       ...row,
