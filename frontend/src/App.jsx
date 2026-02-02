@@ -21,6 +21,7 @@ import Ledger from './pages/Ledger';
 import ProfitLoss from './pages/ProfitLoss';
 import Documents from './pages/Documents';
 import Payments from './pages/Payments';
+import Udhari from './pages/Udhari';
 
 function App() {
   return (
@@ -49,6 +50,7 @@ function App() {
             <Route path="profit-loss" element={<ProfitLoss />} />
             <Route path="documents" element={<Documents />} />
             <Route path="payments" element={<Payments />} />
+            <Route path="udhari" element={<Udhari />} />
             <Route path="reports" element={<Reports />} />
           </Route>
         </Routes>

@@ -23,6 +23,7 @@ import pnlRoutes from './routes/pnl.js';
 import documentsRoutes from './routes/documents.js';
 import paymentsRoutes from './routes/payments.js';
 import consignerLedgerRoutes from './routes/consignerLedger.js';
+import udhariRoutes from './routes/udhari.js';
 
 dotenv.config();
 
@@ -75,6 +76,7 @@ app.use('/api/pnl', pnlRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/consigner-ledger', consignerLedgerRoutes);
+app.use('/api/udhari', udhariRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
