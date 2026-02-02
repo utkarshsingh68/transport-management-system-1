@@ -185,17 +185,7 @@ router.get('/monthly', async (req, res, next) => {
 // Get truck-wise P&L report
 router.get('/truck-wise', async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
-    
-    // Simple query without date filters in subqueries to avoid param issues
-    let dateFilter = '';
-    const params = [];
-    
-    if (start_date && end_date) {
-      dateFilter = ` AND t.start_date >= $1 AND t.start_date <= $2`;
-      params.push(start_date, end_date);
-    }
-
+    // Get all trucks with their trip income
     const result = await query(
       `SELECT 
         tr.id as truck_id,
@@ -203,10 +193,9 @@ router.get('/truck-wise', async (req, res, next) => {
         COUNT(t.id) as total_trips,
         COALESCE(SUM(t.actual_income), 0) as income
        FROM trucks tr
-       LEFT JOIN trips t ON tr.id = t.truck_id AND t.status = 'completed' ${dateFilter}
+       LEFT JOIN trips t ON tr.id = t.truck_id AND t.status = 'completed'
        GROUP BY tr.id, tr.truck_number
-       ORDER BY tr.truck_number`,
-      params
+       ORDER BY tr.truck_number`
     );
 
     // Get expenses and fuel separately for each truck
@@ -220,7 +209,7 @@ router.get('/truck-wise', async (req, res, next) => {
           [row.truck_id]
         );
         expenses = parseFloat(expResult.rows[0]?.total) || 0;
-      } catch (e) {}
+      } catch (e) { console.log('Expense error:', e.message); }
       
       try {
         const fuelResult = await query(
@@ -228,7 +217,7 @@ router.get('/truck-wise', async (req, res, next) => {
           [row.truck_id]
         );
         fuel = parseFloat(fuelResult.rows[0]?.total) || 0;
-      } catch (e) {}
+      } catch (e) { console.log('Fuel error:', e.message); }
       
       const income = parseFloat(row.income) || 0;
       return {
@@ -243,7 +232,8 @@ router.get('/truck-wise', async (req, res, next) => {
 
     res.json(data);
   } catch (error) {
-    next(error);
+    console.error('Truck-wise error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
