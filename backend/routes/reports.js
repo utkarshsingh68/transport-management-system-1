@@ -186,14 +186,14 @@ router.get('/monthly', async (req, res, next) => {
 router.get('/truck-wise', async (req, res, next) => {
   try {
     const { start_date, end_date } = req.query;
-    const params = [];
-    let paramIndex = 1;
-
+    
+    // Simple query without date filters in subqueries to avoid param issues
     let dateFilter = '';
+    const params = [];
+    
     if (start_date && end_date) {
-      dateFilter = ` WHERE t.start_date >= $${paramIndex} AND t.start_date <= $${paramIndex + 1}`;
+      dateFilter = ` AND t.start_date >= $1 AND t.start_date <= $2`;
       params.push(start_date, end_date);
-      paramIndex += 2;
     }
 
     const result = await query(
@@ -201,31 +201,44 @@ router.get('/truck-wise', async (req, res, next) => {
         tr.id as truck_id,
         tr.truck_number,
         COUNT(t.id) as total_trips,
-        COALESCE(SUM(t.actual_income), 0) as income,
-        COALESCE(
-          (SELECT SUM(amount) FROM expenses e WHERE e.truck_id = tr.id 
-           ${start_date && end_date ? `AND e.expense_date >= $${paramIndex} AND e.expense_date <= $${paramIndex + 1}` : ''}),
-          0
-        ) as expenses,
-        COALESCE(
-          (SELECT SUM(total_amount) FROM fuel_entries f WHERE f.truck_id = tr.id 
-           ${start_date && end_date ? `AND f.date >= $${paramIndex} AND f.date <= $${paramIndex + 1}` : ''}),
-          0
-        ) as fuel
+        COALESCE(SUM(t.actual_income), 0) as income
        FROM trucks tr
-       LEFT JOIN trips t ON tr.id = t.truck_id AND t.status = 'completed' ${dateFilter.replace('WHERE', 'AND')}
+       LEFT JOIN trips t ON tr.id = t.truck_id AND t.status = 'completed' ${dateFilter}
        GROUP BY tr.id, tr.truck_number
        ORDER BY tr.truck_number`,
       params
     );
 
-    const data = result.rows.map(row => ({
-      ...row,
-      income: parseFloat(row.income),
-      expenses: parseFloat(row.expenses),
-      fuel: parseFloat(row.fuel),
-      total_costs: parseFloat(row.expenses) + parseFloat(row.fuel),
-      profit: parseFloat(row.income) - (parseFloat(row.expenses) + parseFloat(row.fuel))
+    // Get expenses and fuel separately for each truck
+    const data = await Promise.all(result.rows.map(async (row) => {
+      let expenses = 0;
+      let fuel = 0;
+      
+      try {
+        const expResult = await query(
+          `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE truck_id = $1`,
+          [row.truck_id]
+        );
+        expenses = parseFloat(expResult.rows[0]?.total) || 0;
+      } catch (e) {}
+      
+      try {
+        const fuelResult = await query(
+          `SELECT COALESCE(SUM(total_amount), 0) as total FROM fuel_entries WHERE truck_id = $1`,
+          [row.truck_id]
+        );
+        fuel = parseFloat(fuelResult.rows[0]?.total) || 0;
+      } catch (e) {}
+      
+      const income = parseFloat(row.income) || 0;
+      return {
+        ...row,
+        income,
+        expenses,
+        fuel,
+        total_costs: expenses + fuel,
+        profit: income - (expenses + fuel)
+      };
     }));
 
     res.json(data);
