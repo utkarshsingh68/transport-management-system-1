@@ -174,12 +174,12 @@ router.get('/:id', async (req, res, next) => {
 router.post('/',
   authorizeRoles('admin', 'manager', 'accountant'),
   [
-    body('trip_number').notEmpty().trim(),
+    body('trip_number').optional().trim(),
     body('truck_id').isInt(),
     body('driver_id').isInt(),
     body('from_location').notEmpty().trim(),
     body('to_location').notEmpty().trim(),
-    body('start_date').isDate()
+    body('start_date').notEmpty()
   ],
   async (req, res, next) => {
     try {
@@ -188,13 +188,27 @@ router.post('/',
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const {
+      let {
         trip_number, truck_id, driver_id, from_location, to_location,
         start_date, end_date, distance_km, weight_tons, rate_per_ton,
         rate_type, fixed_amount, actual_income, driver_advance_amount, trip_spent_amount, consignor_name,
         consignee_name, lr_number, status, notes,
         freight_amount, payment_due_date, consigner_id
       } = req.body;
+
+      // Auto-generate trip number if not provided or if duplicate
+      if (!trip_number || trip_number.trim() === '') {
+        const countResult = await query('SELECT COUNT(*) as count FROM trips');
+        const count = parseInt(countResult.rows[0].count) + 1;
+        trip_number = `TRP${String(count).padStart(6, '0')}`;
+      }
+
+      // Check if trip number exists, append timestamp if duplicate
+      const existingTrip = await query('SELECT id FROM trips WHERE trip_number = $1', [trip_number]);
+      if (existingTrip.rows.length > 0) {
+        const timestamp = Date.now().toString().slice(-6);
+        trip_number = `${trip_number}-${timestamp}`;
+      }
 
       const distanceKmNum = toNullableNumber(distance_km);
       const weightTonsNum = toNullableNumber(weight_tons);
