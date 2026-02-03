@@ -75,16 +75,21 @@ router.get('/', async (req, res, next) => {
 router.get('/party/:partyId/trips', async (req, res, next) => {
   try {
     const { partyId } = req.params;
+    const decodedPartyId = decodeURIComponent(partyId);
     
-    // Check if partyId is a number (actual ID) or a string (normalized name)
-    const isNumericId = !isNaN(partyId) && partyId !== '0' && partyId !== 'null';
+    // Check if partyId is a numeric ID
+    const isNumericId = !isNaN(decodedPartyId) && decodedPartyId !== '0' && decodedPartyId !== 'null' && decodedPartyId !== '';
 
     let result;
     if (isNumericId) {
       // Fetch by party ID - also include trips that match by name
-      const partyResult = await query('SELECT name FROM transporters WHERE id = $1', [partyId]);
-      const partyName = partyResult.rows[0]?.name;
+      const partyResult = await query('SELECT name FROM transporters WHERE id = $1', [decodedPartyId]);
+      const partyName = partyResult.rows[0]?.name || '';
+      const normalizedName = partyName.toLowerCase().trim();
       
+      console.log(`Fetching trips for party ID ${decodedPartyId}, name: "${partyName}", normalized: "${normalizedName}"`);
+      
+      // Fetch trips matching by ID OR by normalized name (to catch all related trips)
       result = await query(`
         SELECT 
           t.id,
@@ -109,15 +114,21 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
         FROM trips t
         LEFT JOIN trucks tr ON t.truck_id = tr.id
         LEFT JOIN drivers d ON t.driver_id = d.id
-        WHERE (t.consigner_id = $1 OR ($2 IS NOT NULL AND LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2))))
+        LEFT JOIN transporters p ON t.consigner_id = p.id
+        WHERE (
+          t.consigner_id = $1 
+          OR LOWER(TRIM(COALESCE(p.name, ''))) = $2
+          OR LOWER(TRIM(COALESCE(t.consignor_name, ''))) = $2
+        )
           AND t.amount_due > 0
           AND t.payment_status IN ('pending', 'partial', 'overdue')
         ORDER BY t.start_date DESC
-      `, [partyId, partyName]);
+      `, [decodedPartyId, normalizedName]);
     } else {
-      // Fetch by normalized name (for parties without proper ID)
-      // Decode the partyId in case it's URL encoded
-      const normalizedName = decodeURIComponent(partyId).toLowerCase().trim();
+      // Fetch by normalized name (for parties without proper ID or using name as key)
+      const normalizedName = decodedPartyId.toLowerCase().trim();
+      
+      console.log(`Fetching trips for normalized name: "${normalizedName}"`);
       
       result = await query(`
         SELECT 
@@ -144,12 +155,17 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
         LEFT JOIN trucks tr ON t.truck_id = tr.id
         LEFT JOIN drivers d ON t.driver_id = d.id
         LEFT JOIN transporters p ON t.consigner_id = p.id
-        WHERE (LOWER(TRIM(COALESCE(p.name, t.consignor_name))) = $1)
+        WHERE (
+          LOWER(TRIM(COALESCE(p.name, ''))) = $1
+          OR LOWER(TRIM(COALESCE(t.consignor_name, ''))) = $1
+        )
           AND t.amount_due > 0
           AND t.payment_status IN ('pending', 'partial', 'overdue')
         ORDER BY t.start_date DESC
       `, [normalizedName]);
     }
+
+    console.log(`Udhari trips result: found ${result.rows.length} trips`);
 
     res.json(result.rows.map(row => ({
       ...row,
