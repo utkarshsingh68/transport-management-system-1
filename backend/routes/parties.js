@@ -97,20 +97,56 @@ router.get('/by-name/:name', async (req, res, next) => {
 // Get all parties (transporters/customers)
 router.get('/', async (req, res, next) => {
   try {
+    // Get all parties with their trip-based dues
+    // This matches trips by BOTH consigner_id AND consignor_name to stay in sync with Udhari
     const result = await query(`
-      SELECT p.*,
+      SELECT 
+        p.*,
         COALESCE((SELECT SUM(amount) FROM transporter_invoices WHERE transporter_id = p.id), 0) as total_billed,
         COALESCE((SELECT SUM(amount) FROM transporter_payments WHERE transporter_id = p.id), 0) as total_paid,
-        COALESCE((SELECT SUM(amount_due) FROM trips WHERE consigner_id = p.id AND amount_due > 0), 0) as trip_dues,
-        COALESCE((SELECT SUM(freight_amount) FROM trips WHERE consigner_id = p.id), 0) as total_freight,
-        COALESCE((SELECT SUM(amount_paid) FROM trips WHERE consigner_id = p.id), 0) as total_received,
-        COALESCE((SELECT COUNT(*) FROM trips WHERE consigner_id = p.id AND amount_due > 0), 0) as pending_trips
+        -- Trip dues: match by ID or by normalized name (same logic as Udhari)
+        COALESCE((
+          SELECT SUM(t.amount_due) 
+          FROM trips t 
+          WHERE t.amount_due > 0 
+            AND t.payment_status IN ('pending', 'partial', 'overdue')
+            AND (
+              t.consigner_id = p.id 
+              OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM(p.name))
+            )
+        ), 0) as trip_dues,
+        -- Total freight from all trips
+        COALESCE((
+          SELECT SUM(t.freight_amount) 
+          FROM trips t 
+          WHERE t.consigner_id = p.id 
+            OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM(p.name))
+        ), 0) as total_freight,
+        -- Total received from all trips
+        COALESCE((
+          SELECT SUM(t.amount_paid) 
+          FROM trips t 
+          WHERE t.consigner_id = p.id 
+            OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM(p.name))
+        ), 0) as total_received,
+        -- Count pending trips
+        COALESCE((
+          SELECT COUNT(*) 
+          FROM trips t 
+          WHERE t.amount_due > 0 
+            AND t.payment_status IN ('pending', 'partial', 'overdue')
+            AND (
+              t.consigner_id = p.id 
+              OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM(p.name))
+            )
+        ), 0) as pending_trips
       FROM transporters p
       ORDER BY p.name
     `);
     
     const parties = result.rows.map(p => {
-      // Balance = Opening Balance + Total Billed - Total Paid + Trip Dues (from trips table)
+      // Balance = Opening Balance + Total Billed - Total Paid + Trip Dues
+      // Trip dues already calculated to match Udhari logic
       const invoiceBalance = parseFloat(p.opening_balance || 0) + parseFloat(p.total_billed || 0) - parseFloat(p.total_paid || 0);
       const tripBalance = parseFloat(p.trip_dues || 0);
       
@@ -138,19 +174,70 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Party not found' });
     }
 
+    const party = partyResult.rows[0];
+    const partyName = party.name;
+
+    // Get combined ledger: invoices, payments, AND trip transactions
     const ledgerResult = await query(`
+      -- Invoices (debit)
       SELECT 'invoice' as type, invoice_date as date, invoice_number as reference, 
-             amount as debit, 0 as credit, 'Invoice: ' || invoice_number as description
+             amount as debit, 0 as credit, 'Invoice: ' || invoice_number as description,
+             1 as sort_order
       FROM transporter_invoices WHERE transporter_id = $1
+      
       UNION ALL
+      
+      -- Payments (credit)
       SELECT 'payment' as type, payment_date as date, reference_number as reference,
-             0 as debit, amount as credit, 'Payment: ' || COALESCE(reference_number, 'N/A') as description
+             0 as debit, amount as credit, 'Payment: ' || COALESCE(reference_number, 'N/A') as description,
+             2 as sort_order
       FROM transporter_payments WHERE transporter_id = $1
-      ORDER BY date DESC
-    `, [req.params.id]);
+      
+      UNION ALL
+      
+      -- Trip freight charges (debit) - matched by ID or name
+      SELECT 'trip_freight' as type, t.start_date as date, t.trip_number as reference,
+             t.freight_amount as debit, 0 as credit, 
+             'Trip ' || t.trip_number || ': ' || t.from_location || ' → ' || t.to_location as description,
+             3 as sort_order
+      FROM trips t
+      WHERE (t.consigner_id = $1 OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2)))
+        AND t.freight_amount > 0
+      
+      UNION ALL
+      
+      -- Trip payments received (credit) - from trip_payments table
+      SELECT 'trip_payment' as type, tp.payment_date as date, tp.reference_number as reference,
+             0 as debit, tp.amount as credit,
+             'Trip Payment: ' || t.trip_number || ' (' || COALESCE(tp.payment_mode, 'cash') || ')' as description,
+             4 as sort_order
+      FROM trip_payments tp
+      JOIN trips t ON tp.trip_id = t.id
+      WHERE (t.consigner_id = $1 OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2)))
+      
+      ORDER BY date DESC, sort_order
+    `, [req.params.id, partyName]);
+
+    // Calculate current balance from trips (same as Udhari)
+    const tripDuesResult = await query(`
+      SELECT 
+        COALESCE(SUM(amount_due), 0) as trip_dues,
+        COUNT(*) as pending_trips
+      FROM trips t
+      WHERE t.amount_due > 0 
+        AND t.payment_status IN ('pending', 'partial', 'overdue')
+        AND (t.consigner_id = $1 OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2)))
+    `, [req.params.id, partyName]);
+
+    const tripDues = parseFloat(tripDuesResult.rows[0]?.trip_dues) || 0;
+    const pendingTrips = parseInt(tripDuesResult.rows[0]?.pending_trips) || 0;
 
     res.json({
-      party: partyResult.rows[0],
+      party: {
+        ...party,
+        trip_dues: tripDues,
+        pending_trips: pendingTrips
+      },
       ledger: ledgerResult.rows
     });
   } catch (error) {
