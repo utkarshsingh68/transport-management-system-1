@@ -10,23 +10,40 @@ router.use(authenticateToken);
 // Get all parties with outstanding udhari
 router.get('/', async (req, res, next) => {
   try {
-    // Get all trips with pending dues - group by consigner name or ID
+    // Get all trips with pending dues - group by normalized party name to avoid duplicates
+    // First, get a unified view of parties by matching consigner_id OR consignor_name
     const result = await query(`
+      WITH party_trips AS (
+        SELECT 
+          t.id as trip_id,
+          t.amount_due,
+          t.start_date,
+          -- Use consigner_id if available, otherwise try to find by name match
+          COALESCE(t.consigner_id, name_match.id) as resolved_party_id,
+          -- Normalize the party name (trim and lowercase for grouping)
+          LOWER(TRIM(COALESCE(p.name, t.consignor_name, 'Unknown Party'))) as normalized_name,
+          COALESCE(p.name, name_match.name, t.consignor_name, 'Unknown Party') as display_name,
+          COALESCE(p.phone, name_match.phone) as phone,
+          COALESCE(p.address, name_match.address) as address
+        FROM trips t
+        LEFT JOIN transporters p ON t.consigner_id = p.id
+        LEFT JOIN transporters name_match ON LOWER(TRIM(name_match.name)) = LOWER(TRIM(t.consignor_name)) AND t.consigner_id IS NULL
+        WHERE t.amount_due > 0 
+          AND t.payment_status IN ('pending', 'partial', 'overdue')
+      )
       SELECT 
-        COALESCE(p.id, 0) as id,
-        COALESCE(p.name, t.consignor_name, 'Unknown Party') as name,
-        p.phone,
-        p.address,
-        COUNT(t.id) as pending_trips,
-        COALESCE(SUM(t.amount_due), 0) as total_due,
-        MIN(t.start_date) as oldest_trip_date,
-        MAX(t.start_date) as latest_trip_date
-      FROM trips t
-      LEFT JOIN transporters p ON t.consigner_id = p.id
-      WHERE t.amount_due > 0 
-        AND t.payment_status IN ('pending', 'partial', 'overdue')
-      GROUP BY COALESCE(p.id, 0), COALESCE(p.name, t.consignor_name, 'Unknown Party'), p.phone, p.address
-      HAVING SUM(t.amount_due) > 0
+        MAX(resolved_party_id) as id,
+        MAX(display_name) as name,
+        MAX(phone) as phone,
+        MAX(address) as address,
+        COUNT(trip_id) as pending_trips,
+        COALESCE(SUM(amount_due), 0) as total_due,
+        MIN(start_date) as oldest_trip_date,
+        MAX(start_date) as latest_trip_date,
+        normalized_name
+      FROM party_trips
+      GROUP BY normalized_name
+      HAVING SUM(amount_due) > 0
       ORDER BY total_due DESC
     `);
 
@@ -38,6 +55,7 @@ router.get('/', async (req, res, next) => {
     res.json({
       parties: result.rows.map(row => ({
         ...row,
+        id: row.id || row.normalized_name, // Use normalized_name as fallback ID for grouping
         total_due: parseFloat(row.total_due) || 0,
         pending_trips: parseInt(row.pending_trips) || 0
       })),
@@ -57,10 +75,16 @@ router.get('/', async (req, res, next) => {
 router.get('/party/:partyId/trips', async (req, res, next) => {
   try {
     const { partyId } = req.params;
+    
+    // Check if partyId is a number (actual ID) or a string (normalized name)
+    const isNumericId = !isNaN(partyId) && partyId !== '0' && partyId !== 'null';
 
     let result;
-    if (partyId === '0' || partyId === 'null') {
-      // Get trips without consigner_id
+    if (isNumericId) {
+      // Fetch by party ID - also include trips that match by name
+      const partyResult = await query('SELECT name FROM transporters WHERE id = $1', [partyId]);
+      const partyName = partyResult.rows[0]?.name;
+      
       result = await query(`
         SELECT 
           t.id,
@@ -85,12 +109,16 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
         FROM trips t
         LEFT JOIN trucks tr ON t.truck_id = tr.id
         LEFT JOIN drivers d ON t.driver_id = d.id
-        WHERE t.consigner_id IS NULL
+        WHERE (t.consigner_id = $1 OR ($2 IS NOT NULL AND LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2))))
           AND t.amount_due > 0
           AND t.payment_status IN ('pending', 'partial', 'overdue')
         ORDER BY t.start_date DESC
-      `);
+      `, [partyId, partyName]);
     } else {
+      // Fetch by normalized name (for parties without proper ID)
+      // Decode the partyId in case it's URL encoded
+      const normalizedName = decodeURIComponent(partyId).toLowerCase().trim();
+      
       result = await query(`
         SELECT 
           t.id,
@@ -115,11 +143,12 @@ router.get('/party/:partyId/trips', async (req, res, next) => {
         FROM trips t
         LEFT JOIN trucks tr ON t.truck_id = tr.id
         LEFT JOIN drivers d ON t.driver_id = d.id
-        WHERE t.consigner_id = $1
+        LEFT JOIN transporters p ON t.consigner_id = p.id
+        WHERE (LOWER(TRIM(COALESCE(p.name, t.consignor_name))) = $1)
           AND t.amount_due > 0
           AND t.payment_status IN ('pending', 'partial', 'overdue')
         ORDER BY t.start_date DESC
-      `, [partyId]);
+      `, [normalizedName]);
     }
 
     res.json(result.rows.map(row => ({

@@ -46,28 +46,35 @@ const Udhari = () => {
     }
   };
 
-  const fetchPartyTrips = async (partyId) => {
-    if (partyTrips[partyId]) {
+  const fetchPartyTrips = async (partyKey) => {
+    if (partyTrips[partyKey]) {
       return; // Already loaded
     }
-    setLoadingTrips(prev => ({ ...prev, [partyId]: true }));
+    setLoadingTrips(prev => ({ ...prev, [partyKey]: true }));
     try {
-      const response = await api.get(`/udhari/party/${partyId}/trips`);
-      setPartyTrips(prev => ({ ...prev, [partyId]: response.data }));
+      // Use the partyKey which could be ID or normalized_name
+      const encodedKey = encodeURIComponent(partyKey);
+      const response = await api.get(`/udhari/party/${encodedKey}/trips`);
+      setPartyTrips(prev => ({ ...prev, [partyKey]: response.data }));
     } catch (error) {
       toast.error('Failed to fetch trip details');
     } finally {
-      setLoadingTrips(prev => ({ ...prev, [partyId]: false }));
+      setLoadingTrips(prev => ({ ...prev, [partyKey]: false }));
     }
   };
 
-  const togglePartyExpand = async (partyId) => {
-    const isExpanded = expandedParties[partyId];
-    setExpandedParties(prev => ({ ...prev, [partyId]: !isExpanded }));
+  const togglePartyExpand = async (partyKey) => {
+    const isExpanded = expandedParties[partyKey];
+    setExpandedParties(prev => ({ ...prev, [partyKey]: !isExpanded }));
     
     if (!isExpanded) {
-      await fetchPartyTrips(partyId);
+      await fetchPartyTrips(partyKey);
     }
+  };
+
+  // Get unique key for a party (prefer ID, fallback to normalized_name)
+  const getPartyKey = (party) => {
+    return party.id || party.normalized_name || party.name?.toLowerCase().trim();
   };
 
   const handleRecordPayment = (trip, party) => {
@@ -266,12 +273,14 @@ const Udhari = () => {
             <p className="text-slate-500 mt-2">All payments are settled. Great job!</p>
           </div>
         ) : (
-          filteredData.map((party) => (
-            <div key={party.id || party.name} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+          filteredData.map((party) => {
+            const partyKey = getPartyKey(party);
+            return (
+            <div key={partyKey} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
               {/* Party Header - Clickable to Expand */}
               <div 
                 className="p-5 cursor-pointer hover:bg-slate-50/50 transition-colors"
-                onClick={() => togglePartyExpand(party.id || party.name)}
+                onClick={() => togglePartyExpand(partyKey)}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -298,22 +307,22 @@ const Udhari = () => {
                       <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">Total Due</p>
                       <p className="text-2xl font-extrabold text-red-600">{formatCurrency(party.total_due)}</p>
                     </div>
-                    <div className={`p-2.5 rounded-full bg-slate-100 transition-all duration-300 ${expandedParties[party.id || party.name] ? 'rotate-180 bg-orange-100' : ''}`}>
-                      <ChevronDown size={22} className={expandedParties[party.id || party.name] ? 'text-orange-600' : 'text-slate-400'} />
+                    <div className={`p-2.5 rounded-full bg-slate-100 transition-all duration-300 ${expandedParties[partyKey] ? 'rotate-180 bg-orange-100' : ''}`}>
+                      <ChevronDown size={22} className={expandedParties[partyKey] ? 'text-orange-600' : 'text-slate-400'} />
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* Trip Details - Expandable */}
-              {expandedParties[party.id || party.name] && (
+              {expandedParties[partyKey] && (
                 <div className="border-t border-slate-200 bg-gradient-to-b from-slate-50 to-white">
-                  {loadingTrips[party.id || party.name] ? (
+                  {loadingTrips[partyKey] ? (
                     <div className="p-10 text-center">
                       <div className="w-10 h-10 border-4 border-orange-200 border-t-orange-600 rounded-full animate-spin mx-auto"></div>
                       <p className="text-slate-500 mt-3 font-medium">Loading trips...</p>
                     </div>
-                  ) : partyTrips[party.id || party.name]?.length > 0 ? (
+                  ) : partyTrips[partyKey]?.length > 0 ? (
                     <div className="p-5">
                       {/* Trip List Header */}
                       <div className="flex items-center justify-between mb-4">
@@ -322,13 +331,13 @@ const Udhari = () => {
                           Trip-wise Breakdown
                         </h4>
                         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                          {partyTrips[party.id || party.name].length} trip(s)
+                          {partyTrips[partyKey].length} trip(s)
                         </span>
                       </div>
                       
                       {/* Trip Cards */}
                       <div className="space-y-3">
-                        {partyTrips[party.id || party.name].map((trip) => (
+                        {partyTrips[partyKey].map((trip) => (
                           <div key={trip.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:border-orange-200 hover:shadow-sm transition-all">
                             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                               {/* Trip Info */}
@@ -422,7 +431,7 @@ const Udhari = () => {
                 </div>
               )}
             </div>
-          ))
+          );})
         )}
       </div>
 
