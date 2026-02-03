@@ -100,15 +100,29 @@ router.get('/', async (req, res, next) => {
     const result = await query(`
       SELECT p.*,
         COALESCE((SELECT SUM(amount) FROM transporter_invoices WHERE transporter_id = p.id), 0) as total_billed,
-        COALESCE((SELECT SUM(amount) FROM transporter_payments WHERE transporter_id = p.id), 0) as total_paid
+        COALESCE((SELECT SUM(amount) FROM transporter_payments WHERE transporter_id = p.id), 0) as total_paid,
+        COALESCE((SELECT SUM(amount_due) FROM trips WHERE consigner_id = p.id AND amount_due > 0), 0) as trip_dues,
+        COALESCE((SELECT SUM(freight_amount) FROM trips WHERE consigner_id = p.id), 0) as total_freight,
+        COALESCE((SELECT SUM(amount_paid) FROM trips WHERE consigner_id = p.id), 0) as total_received,
+        COALESCE((SELECT COUNT(*) FROM trips WHERE consigner_id = p.id AND amount_due > 0), 0) as pending_trips
       FROM transporters p
       ORDER BY p.name
     `);
     
-    const parties = result.rows.map(p => ({
-      ...p,
-      balance: parseFloat(p.opening_balance) + parseFloat(p.total_billed) - parseFloat(p.total_paid)
-    }));
+    const parties = result.rows.map(p => {
+      // Balance = Opening Balance + Total Billed - Total Paid + Trip Dues (from trips table)
+      const invoiceBalance = parseFloat(p.opening_balance || 0) + parseFloat(p.total_billed || 0) - parseFloat(p.total_paid || 0);
+      const tripBalance = parseFloat(p.trip_dues || 0);
+      
+      return {
+        ...p,
+        balance: invoiceBalance + tripBalance,
+        trip_dues: parseFloat(p.trip_dues || 0),
+        total_freight: parseFloat(p.total_freight || 0),
+        total_received: parseFloat(p.total_received || 0),
+        pending_trips: parseInt(p.pending_trips || 0)
+      };
+    });
     
     res.json(parties);
   } catch (error) {

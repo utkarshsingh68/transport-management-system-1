@@ -237,9 +237,16 @@ export default function Parties() {
                       ) : '-'}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <span className={`font-bold ${party.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(party.balance)}
-                      </span>
+                      <div>
+                        <span className={`font-bold ${party.balance > 0 ? 'text-red-600' : party.balance < 0 ? 'text-green-600' : 'text-slate-600'}`}>
+                          {formatCurrency(party.balance)}
+                        </span>
+                        {party.pending_trips > 0 && (
+                          <p className="text-xs text-orange-600 mt-0.5">
+                            {party.pending_trips} pending trip{party.pending_trips > 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex justify-center gap-1">
