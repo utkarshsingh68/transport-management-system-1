@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, BookOpen, X, Users, TrendingUp, TrendingDown, Search } from 'lucide-react';
+import { Plus, Edit2, BookOpen, X, Users, TrendingUp, TrendingDown, Search, Trash2, AlertTriangle } from 'lucide-react';
+import { toast } from 'react-toastify';
 import api from '../services/api';
 
 export default function Parties() {
@@ -14,6 +15,9 @@ export default function Parties() {
     name: '', company_name: '', phone: '', email: '', address: '',
     gstin: '', pan: '', bank_details: '', opening_balance: 0
   });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [partyToDelete, setPartyToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchParties();
@@ -71,6 +75,32 @@ export default function Parties() {
       opening_balance: party.opening_balance || 0
     });
     setShowModal(true);
+  };
+
+  const handleDeleteClick = (party) => {
+    setPartyToDelete(party);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!partyToDelete) return;
+    
+    setDeleting(true);
+    try {
+      await api.delete(`/parties/${partyToDelete.id}`);
+      toast.success(`Party "${partyToDelete.name}" deleted successfully`);
+      setShowDeleteConfirm(false);
+      setPartyToDelete(null);
+      fetchParties();
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || 'Failed to delete party';
+      toast.error(errorMsg);
+      if (error.response?.data?.linkedTrips) {
+        toast.info(`This party has ${error.response.data.linkedTrips} linked trip(s)`);
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const formatCurrency = (amount) => {
@@ -227,6 +257,13 @@ export default function Parties() {
                         >
                           <Edit2 size={16} />
                         </button>
+                        <button 
+                          onClick={() => handleDeleteClick(party)} 
+                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          title="Delete Party"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -297,6 +334,51 @@ export default function Parties() {
                 <button type="submit" className="px-5 py-2.5 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-xl font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/40 transition-all">Save Party</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && partyToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} className="text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Delete Party?</h3>
+              <p className="text-slate-500 mb-1">Are you sure you want to delete</p>
+              <p className="font-semibold text-slate-800 text-lg mb-4">"{partyToDelete.name}"?</p>
+              <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg mb-6">
+                ⚠️ This action cannot be undone. All ledger entries and payment records for this party will be permanently deleted.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowDeleteConfirm(false); setPartyToDelete(null); }}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors"
+                  disabled={deleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  disabled={deleting}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg shadow-red-500/30 hover:shadow-red-500/40 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {deleting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      Delete Party
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

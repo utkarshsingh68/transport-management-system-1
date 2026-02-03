@@ -196,6 +196,51 @@ router.put('/:id', authorizeRoles('admin', 'manager', 'accountant'), async (req,
   }
 });
 
+// Delete party
+router.delete('/:id', authorizeRoles('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Check if party has any linked trips
+    const tripsCheck = await query(
+      'SELECT COUNT(*) as count FROM trips WHERE consigner_id = $1',
+      [id]
+    );
+
+    if (parseInt(tripsCheck.rows[0].count) > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete party with linked trips. Please remove or reassign trips first.',
+        linkedTrips: parseInt(tripsCheck.rows[0].count)
+      });
+    }
+
+    // Delete related records first (if any)
+    try {
+      await query('DELETE FROM consigner_balance WHERE consigner_id = $1', [id]);
+      await query('DELETE FROM consigner_ledger WHERE consigner_id = $1', [id]);
+      await query('DELETE FROM transporter_invoices WHERE transporter_id = $1', [id]);
+      await query('DELETE FROM transporter_payments WHERE transporter_id = $1', [id]);
+    } catch (err) {
+      console.log('Related records cleanup:', err.message);
+    }
+
+    // Delete the party
+    const result = await query(
+      'DELETE FROM transporters WHERE id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Party not found' });
+    }
+
+    res.json({ success: true, message: 'Party deleted successfully', party: result.rows[0] });
+  } catch (error) {
+    console.error('Delete party error:', error.message);
+    next(error);
+  }
+});
+
 // Add invoice for party
 router.post('/:id/invoices',
   authorizeRoles('admin', 'manager', 'accountant'),
