@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Wallet, Building2, PiggyBank, CreditCard, X, Banknote, BookOpen } from 'lucide-react';
+import { Plus, Wallet, Building2, PiggyBank, CreditCard, X, Banknote, BookOpen, Edit2, Trash2 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import api from '../services/api';
 
 export default function Ledger() {
@@ -10,6 +11,7 @@ export default function Ledger() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [transactionType, setTransactionType] = useState('cash');
+  const [editingTransaction, setEditingTransaction] = useState(null);
   const [formData, setFormData] = useState({
     transaction_date: new Date().toISOString().split('T')[0],
     transaction_type: 'expense', // for cash: income/expense, for bank: credit/debit
@@ -54,8 +56,19 @@ export default function Ledger() {
       if (transactionType === 'bank') {
         payload.transaction_type = formData.transaction_type === 'income' ? 'credit' : 'debit';
       }
-      await api.post(endpoint, payload);
+      
+      if (editingTransaction) {
+        // Update existing transaction
+        await api.put(`${endpoint}/${editingTransaction.id}`, payload);
+        toast.success('Transaction updated successfully');
+      } else {
+        // Create new transaction
+        await api.post(endpoint, payload);
+        toast.success('Transaction added successfully');
+      }
+      
       setShowModal(false);
+      setEditingTransaction(null);
       setFormData({
         transaction_date: new Date().toISOString().split('T')[0],
         transaction_type: 'expense',
@@ -68,11 +81,13 @@ export default function Ledger() {
       fetchData();
     } catch (error) {
       console.error('Error saving transaction:', error);
+      toast.error(error.response?.data?.error || 'Failed to save transaction');
     }
   };
 
   const openAddModal = (type) => {
     setTransactionType(type);
+    setEditingTransaction(null);
     setFormData({
       transaction_date: new Date().toISOString().split('T')[0],
       transaction_type: 'expense',
@@ -83,6 +98,35 @@ export default function Ledger() {
       reference_number: ''
     });
     setShowModal(true);
+  };
+
+  const handleEdit = (txn, type) => {
+    setTransactionType(type);
+    setEditingTransaction(txn);
+    setFormData({
+      transaction_date: txn.transaction_date ? new Date(txn.transaction_date).toISOString().split('T')[0] : '',
+      transaction_type: type === 'cash' ? txn.transaction_type : (txn.transaction_type === 'credit' ? 'income' : 'expense'),
+      bank_name: txn.bank_name || '',
+      category: txn.category || '',
+      amount: txn.amount || '',
+      description: txn.description || '',
+      reference_number: txn.reference_number || ''
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (txn, type) => {
+    if (!confirm(`Delete this ${type} transaction?`)) return;
+    
+    try {
+      const endpoint = type === 'cash' ? '/ledger/cash' : '/ledger/bank';
+      await api.delete(`${endpoint}/${txn.id}`);
+      toast.success('Transaction deleted successfully');
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      toast.error(error.response?.data?.error || 'Failed to delete transaction');
+    }
   };
 
   const formatCurrency = (amount) => {
@@ -229,12 +273,13 @@ export default function Ledger() {
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">In</th>
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Out</th>
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Balance</th>
+                  <th className="text-center px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {cashTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="px-6 py-12 text-center">
+                    <td colSpan="7" className="px-6 py-12 text-center">
                       <Banknote size={48} className="mx-auto text-slate-300 mb-3" />
                       <p className="text-slate-500 font-medium">No cash transactions found</p>
                     </td>
@@ -254,6 +299,24 @@ export default function Ledger() {
                         {txn.transaction_type === 'expense' ? formatCurrency(txn.amount) : ''}
                       </td>
                       <td className="px-6 py-4 text-right font-bold text-slate-900">{formatCurrency(txn.balance_after)}</td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex justify-center gap-1">
+                          <button
+                            onClick={() => handleEdit(txn, 'cash')}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            title="Edit"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(txn, 'cash')}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -277,12 +340,13 @@ export default function Ledger() {
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Credit</th>
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Debit</th>
                   <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Balance</th>
+                  <th className="text-center px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {bankTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="px-6 py-12 text-center">
+                    <td colSpan="9" className="px-6 py-12 text-center">
                       <Building2 size={48} className="mx-auto text-slate-300 mb-3" />
                       <p className="text-slate-500 font-medium">No bank transactions found</p>
                     </td>
@@ -311,6 +375,24 @@ export default function Ledger() {
                         {txn.transaction_type === 'debit' ? formatCurrency(txn.amount) : ''}
                       </td>
                       <td className="px-6 py-4 text-right font-bold text-slate-900">{formatCurrency(txn.balance_after)}</td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex justify-center gap-1">
+                          <button
+                            onClick={() => handleEdit(txn, 'bank')}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            title="Edit"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(txn, 'bank')}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -326,11 +408,11 @@ export default function Ledger() {
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-slate-200">
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">Add {transactionType === 'cash' ? 'Cash' : 'Bank'} Transaction</h2>
-                <p className="text-slate-500 mt-1">Record a new {transactionType} entry</p>
+                <h2 className="text-2xl font-bold text-slate-900">{editingTransaction ? 'Edit' : 'Add'} {transactionType === 'cash' ? 'Cash' : 'Bank'} Transaction</h2>
+                <p className="text-slate-500 mt-1">{editingTransaction ? 'Update' : 'Record a new'} {transactionType} entry</p>
               </div>
               <button 
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setEditingTransaction(null); }}
                 className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <X size={20} />
@@ -380,8 +462,8 @@ export default function Ledger() {
                 </div>
               )}
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
-                <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 border border-slate-200 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors">Cancel</button>
-                <button type="submit" className={`px-5 py-2.5 rounded-xl font-semibold shadow-lg transition-all ${transactionType === 'cash' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-green-500/30 hover:shadow-green-500/40' : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-blue-500/30 hover:shadow-blue-500/40'}`}>Save Transaction</button>
+                <button type="button" onClick={() => { setShowModal(false); setEditingTransaction(null); }} className="px-5 py-2.5 border border-slate-200 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" className={`px-5 py-2.5 rounded-xl font-semibold shadow-lg transition-all ${transactionType === 'cash' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-green-500/30 hover:shadow-green-500/40' : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-blue-500/30 hover:shadow-blue-500/40'}`}>{editingTransaction ? 'Update' : 'Save'} Transaction</button>
               </div>
             </form>
           </div>

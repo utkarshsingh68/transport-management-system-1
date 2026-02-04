@@ -118,6 +118,81 @@ router.post('/cash',
   }
 );
 
+// Update cash transaction
+router.put('/cash/:id',
+  authorizeRoles('admin', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { transaction_date, transaction_type, category, amount, description } = req.body;
+
+      const result = await query(
+        `UPDATE cash_transactions 
+         SET transaction_date = $1, transaction_type = $2, category = $3, amount = $4, description = $5
+         WHERE id = $6
+         RETURNING *`,
+        [transaction_date, transaction_type, category, amount, description, id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Transaction not found' });
+      }
+
+      // Recalculate all balances
+      await recalculateCashBalances();
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Delete cash transaction
+router.delete('/cash/:id',
+  authorizeRoles('admin', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+
+      const result = await query(
+        'DELETE FROM cash_transactions WHERE id = $1 RETURNING *',
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Transaction not found' });
+      }
+
+      // Recalculate all balances
+      await recalculateCashBalances();
+
+      res.json({ success: true, message: 'Transaction deleted successfully' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Helper function to recalculate cash balances
+async function recalculateCashBalances() {
+  const transactions = await query(
+    'SELECT id, transaction_type, amount FROM cash_transactions ORDER BY transaction_date ASC, id ASC'
+  );
+  
+  let balance = 0;
+  for (const txn of transactions.rows) {
+    balance = txn.transaction_type === 'income' 
+      ? balance + parseFloat(txn.amount)
+      : balance - parseFloat(txn.amount);
+    
+    await query(
+      'UPDATE cash_transactions SET balance_after = $1 WHERE id = $2',
+      [balance, txn.id]
+    );
+  }
+}
+
 // Add bank transaction
 router.post('/bank',
   authorizeRoles('admin', 'accountant'),
@@ -160,6 +235,89 @@ router.post('/bank',
     }
   }
 );
+
+// Update bank transaction
+router.put('/bank/:id',
+  authorizeRoles('admin', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { transaction_date, bank_name, transaction_type, category, amount, description, reference_number } = req.body;
+
+      // Convert income/expense to credit/debit for bank
+      const bankType = transaction_type === 'income' ? 'credit' : 'debit';
+
+      const result = await query(
+        `UPDATE bank_transactions 
+         SET transaction_date = $1, bank_name = $2, transaction_type = $3, category = $4, amount = $5, description = $6, reference_number = $7
+         WHERE id = $8
+         RETURNING *`,
+        [transaction_date, bank_name, bankType, category, amount, description, reference_number, id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Transaction not found' });
+      }
+
+      // Recalculate all balances for this bank
+      await recalculateBankBalances(bank_name);
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Delete bank transaction
+router.delete('/bank/:id',
+  authorizeRoles('admin', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+
+      // Get the bank name before deleting
+      const txn = await query('SELECT bank_name FROM bank_transactions WHERE id = $1', [id]);
+      if (txn.rows.length === 0) {
+        return res.status(404).json({ error: 'Transaction not found' });
+      }
+
+      const bankName = txn.rows[0].bank_name;
+
+      const result = await query(
+        'DELETE FROM bank_transactions WHERE id = $1 RETURNING *',
+        [id]
+      );
+
+      // Recalculate all balances for this bank
+      await recalculateBankBalances(bankName);
+
+      res.json({ success: true, message: 'Transaction deleted successfully' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Helper function to recalculate bank balances
+async function recalculateBankBalances(bankName) {
+  const transactions = await query(
+    'SELECT id, transaction_type, amount FROM bank_transactions WHERE bank_name = $1 ORDER BY transaction_date ASC, id ASC',
+    [bankName]
+  );
+  
+  let balance = 0;
+  for (const txn of transactions.rows) {
+    balance = txn.transaction_type === 'credit' 
+      ? balance + parseFloat(txn.amount)
+      : balance - parseFloat(txn.amount);
+    
+    await query(
+      'UPDATE bank_transactions SET balance_after = $1 WHERE id = $2',
+      [balance, txn.id]
+    );
+  }
+}
 
 // Get ledger summary
 router.get('/summary', async (req, res, next) => {
