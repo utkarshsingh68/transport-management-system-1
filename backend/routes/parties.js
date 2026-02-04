@@ -180,26 +180,26 @@ router.get('/:id', async (req, res, next) => {
     // Get combined ledger: invoices, payments, AND trip transactions
     const ledgerResult = await query(`
       -- Invoices (debit)
-      SELECT 'invoice' as type, invoice_date as date, invoice_number as reference, 
+      SELECT id, 'invoice' as type, invoice_date as date, invoice_number as reference, 
              amount as debit, 0 as credit, 'Invoice: ' || invoice_number as description,
-             1 as sort_order
+             1 as sort_order, TRUE as editable
       FROM transporter_invoices WHERE transporter_id = $1
       
       UNION ALL
       
       -- Payments (credit)
-      SELECT 'payment' as type, payment_date as date, reference_number as reference,
+      SELECT id, 'payment' as type, payment_date as date, reference_number as reference,
              0 as debit, amount as credit, 'Payment: ' || COALESCE(reference_number, 'N/A') as description,
-             2 as sort_order
+             2 as sort_order, TRUE as editable
       FROM transporter_payments WHERE transporter_id = $1
       
       UNION ALL
       
       -- Trip freight charges (debit) - matched by ID or name
-      SELECT 'trip_freight' as type, t.start_date as date, t.trip_number as reference,
+      SELECT t.id, 'trip_freight' as type, t.start_date as date, t.trip_number as reference,
              t.freight_amount as debit, 0 as credit, 
              'Trip ' || t.trip_number || ': ' || t.from_location || ' → ' || t.to_location as description,
-             3 as sort_order
+             3 as sort_order, FALSE as editable
       FROM trips t
       WHERE (t.consigner_id = $1 OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2)))
         AND t.freight_amount > 0
@@ -207,10 +207,10 @@ router.get('/:id', async (req, res, next) => {
       UNION ALL
       
       -- Trip payments received (credit) - from trip_payments table
-      SELECT 'trip_payment' as type, tp.payment_date as date, tp.reference_number as reference,
+      SELECT tp.id, 'trip_payment' as type, tp.payment_date as date, tp.reference_number as reference,
              0 as debit, tp.amount as credit,
              'Trip Payment: ' || t.trip_number || ' (' || COALESCE(tp.payment_mode, 'cash') || ')' as description,
-             4 as sort_order
+             4 as sort_order, FALSE as editable
       FROM trip_payments tp
       JOIN trips t ON tp.trip_id = t.id
       WHERE (t.consigner_id = $1 OR LOWER(TRIM(t.consignor_name)) = LOWER(TRIM($2)))
@@ -378,6 +378,106 @@ router.post('/:id/payments',
       );
 
       res.status(201).json(result.rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Update invoice
+router.put('/:partyId/invoices/:invoiceId',
+  authorizeRoles('admin', 'manager', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { partyId, invoiceId } = req.params;
+      const { date, amount, reference } = req.body;
+
+      const result = await query(
+        `UPDATE transporter_invoices 
+         SET invoice_date = $1, amount = $2, invoice_number = $3
+         WHERE id = $4 AND transporter_id = $5
+         RETURNING *`,
+        [date, amount, reference, invoiceId, partyId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Delete invoice
+router.delete('/:partyId/invoices/:invoiceId',
+  authorizeRoles('admin', 'manager', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { partyId, invoiceId } = req.params;
+
+      const result = await query(
+        `DELETE FROM transporter_invoices WHERE id = $1 AND transporter_id = $2 RETURNING *`,
+        [invoiceId, partyId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      res.json({ success: true, message: 'Invoice deleted successfully' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Update payment
+router.put('/:partyId/payments/:paymentId',
+  authorizeRoles('admin', 'manager', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { partyId, paymentId } = req.params;
+      const { date, amount, reference } = req.body;
+
+      const result = await query(
+        `UPDATE transporter_payments 
+         SET payment_date = $1, amount = $2, reference_number = $3
+         WHERE id = $4 AND transporter_id = $5
+         RETURNING *`,
+        [date, amount, reference, paymentId, partyId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Payment not found' });
+      }
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Delete payment
+router.delete('/:partyId/payments/:paymentId',
+  authorizeRoles('admin', 'manager', 'accountant'),
+  async (req, res, next) => {
+    try {
+      const { partyId, paymentId } = req.params;
+
+      const result = await query(
+        `DELETE FROM transporter_payments WHERE id = $1 AND transporter_id = $2 RETURNING *`,
+        [paymentId, partyId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Payment not found' });
+      }
+
+      res.json({ success: true, message: 'Payment deleted successfully' });
     } catch (error) {
       next(error);
     }

@@ -18,6 +18,14 @@ export default function Parties() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [partyToDelete, setPartyToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [showEditLedger, setShowEditLedger] = useState(false);
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [editLedgerForm, setEditLedgerForm] = useState({
+    date: '',
+    amount: '',
+    reference: '',
+    notes: ''
+  });
 
   useEffect(() => {
     fetchParties();
@@ -105,6 +113,57 @@ export default function Parties() {
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+  };
+
+  const handleEditLedgerEntry = (entry) => {
+    setEditingEntry(entry);
+    setEditLedgerForm({
+      date: entry.date ? new Date(entry.date).toISOString().split('T')[0] : '',
+      amount: entry.debit > 0 ? entry.debit : entry.credit,
+      reference: entry.reference || '',
+      notes: ''
+    });
+    setShowEditLedger(true);
+  };
+
+  const submitEditLedgerEntry = async (e) => {
+    e.preventDefault();
+    if (!editingEntry || !ledgerData.party) return;
+
+    try {
+      const endpoint = editingEntry.type === 'invoice' 
+        ? `/parties/${ledgerData.party.id}/invoices/${editingEntry.id}`
+        : `/parties/${ledgerData.party.id}/payments/${editingEntry.id}`;
+      
+      await api.put(endpoint, {
+        date: editLedgerForm.date,
+        amount: parseFloat(editLedgerForm.amount),
+        reference: editLedgerForm.reference
+      });
+      
+      toast.success('Ledger entry updated successfully');
+      setShowEditLedger(false);
+      setEditingEntry(null);
+      fetchLedger(ledgerData.party.id);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to update entry');
+    }
+  };
+
+  const handleDeleteLedgerEntry = async (entry) => {
+    if (!confirm(`Delete this ${entry.type} entry?`)) return;
+    
+    try {
+      const endpoint = entry.type === 'invoice' 
+        ? `/parties/${ledgerData.party.id}/invoices/${entry.id}`
+        : `/parties/${ledgerData.party.id}/payments/${entry.id}`;
+      
+      await api.delete(endpoint);
+      toast.success('Entry deleted successfully');
+      fetchLedger(ledgerData.party.id);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to delete entry');
+    }
   };
 
   if (loading) {
@@ -430,12 +489,13 @@ export default function Parties() {
                     <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Description</th>
                     <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Debit</th>
                     <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Credit</th>
+                    <th className="text-center px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {ledgerData.ledger.length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="px-6 py-12 text-center">
+                      <td colSpan="5" className="px-6 py-12 text-center">
                         <BookOpen size={48} className="mx-auto text-slate-300 mb-3" />
                         <p className="text-slate-500 font-medium">No transactions found</p>
                       </td>
@@ -444,15 +504,119 @@ export default function Parties() {
                     ledgerData.ledger.map((item, index) => (
                       <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
                         <td className="px-6 py-4 text-slate-600">{new Date(item.date).toLocaleDateString()}</td>
-                        <td className="px-6 py-4 text-slate-900">{item.description}</td>
+                        <td className="px-6 py-4 text-slate-900">
+                          <div className="flex items-center gap-2">
+                            {item.description}
+                            {item.type === 'invoice' && <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">Invoice</span>}
+                            {item.type === 'payment' && <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded">Payment</span>}
+                            {item.type === 'trip_freight' && <span className="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">Trip</span>}
+                            {item.type === 'trip_payment' && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">Trip Payment</span>}
+                          </div>
+                        </td>
                         <td className="px-6 py-4 text-right text-red-600 font-medium">{item.debit > 0 ? formatCurrency(item.debit) : ''}</td>
                         <td className="px-6 py-4 text-right text-green-600 font-medium">{item.credit > 0 ? formatCurrency(item.credit) : ''}</td>
+                        <td className="px-6 py-4 text-center">
+                          {item.editable ? (
+                            <div className="flex justify-center gap-1">
+                              <button
+                                onClick={() => handleEditLedgerEntry(item)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                title="Edit"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteLedgerEntry(item)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                title="Delete"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Ledger Entry Modal */}
+      {showEditLedger && editingEntry && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="p-6 border-b border-slate-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">
+                    Edit {editingEntry.type === 'invoice' ? 'Invoice' : 'Payment'}
+                  </h3>
+                  <p className="text-slate-500 text-sm mt-1">{editingEntry.description}</p>
+                </div>
+                <button
+                  onClick={() => { setShowEditLedger(false); setEditingEntry(null); }}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <form onSubmit={submitEditLedgerEntry} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Date *</label>
+                <input
+                  type="date"
+                  value={editLedgerForm.date}
+                  onChange={(e) => setEditLedgerForm({ ...editLedgerForm, date: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editLedgerForm.amount}
+                  onChange={(e) => setEditLedgerForm({ ...editLedgerForm, amount: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  {editingEntry.type === 'invoice' ? 'Invoice Number' : 'Reference Number'}
+                </label>
+                <input
+                  type="text"
+                  value={editLedgerForm.reference}
+                  onChange={(e) => setEditLedgerForm({ ...editLedgerForm, reference: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                  placeholder={editingEntry.type === 'invoice' ? 'INV-001' : 'TXN-123'}
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowEditLedger(false); setEditingEntry(null); }}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-xl font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/40 transition-all"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
