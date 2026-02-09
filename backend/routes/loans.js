@@ -244,6 +244,10 @@ router.post('/', async (req, res) => {
     const maturityDate = new Date(emi_start_date);
     maturityDate.setMonth(maturityDate.getMonth() + tenure_months - 1);
 
+    // Default disbursement_date and sanction_date to emi_start_date if not provided
+    const actualDisbursementDate = disbursement_date || emi_start_date;
+    const actualSanctionDate = sanction_date || emi_start_date;
+
     const loanResult = await client.query(`
       INSERT INTO loans (
         loan_name, truck_id, asset_type, lender_type, lender_name, lender_branch,
@@ -256,7 +260,7 @@ router.post('/', async (req, res) => {
     `, [
       loan_name, truck_id || null, asset_type, lender_type, lender_name, lender_branch,
       loan_account_number, loan_type, principal_amount, interest_rate, interest_type,
-      tenure_months, calculatedEMI, emi_start_date, emi_day || 1, sanction_date, disbursement_date,
+      tenure_months, calculatedEMI, emi_start_date, emi_day || 1, actualSanctionDate, actualDisbursementDate,
       maturityDate.toISOString().split('T')[0], processing_fee || 0, insurance_amount || 0, notes, req.user.id
     ]);
 
