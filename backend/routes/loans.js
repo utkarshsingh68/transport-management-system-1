@@ -353,7 +353,16 @@ router.post('/:id/pay', async (req, res) => {
     await client.query('BEGIN');
 
     const loanId = req.params.id;
-    const { payment_date, payment_amount, payment_mode, payment_reference, bank_account_id, notes, emi_schedule_id } = req.body;
+    const { 
+      payment_date, payment_amount, amount, payment_mode, 
+      payment_reference, reference_number, bank_account_id, notes, 
+      emi_schedule_id, emi_id 
+    } = req.body;
+
+    // Handle field name aliases from frontend
+    const actualPaymentAmount = payment_amount || amount;
+    const actualPaymentReference = payment_reference || reference_number || '';
+    const actualEmiScheduleId = emi_schedule_id || emi_id || null;
 
     const loan = await client.query('SELECT * FROM loans WHERE id = $1', [loanId]);
     if (loan.rows.length === 0) {
@@ -363,10 +372,10 @@ router.post('/:id/pay', async (req, res) => {
     const loanData = loan.rows[0];
     let principalPaid = 0;
     let interestPaid = 0;
-    let remainingPayment = parseFloat(payment_amount);
+    let remainingPayment = parseFloat(actualPaymentAmount);
 
-    if (emi_schedule_id) {
-      const emi = await client.query('SELECT * FROM emi_schedule WHERE id = $1', [emi_schedule_id]);
+    if (actualEmiScheduleId) {
+      const emi = await client.query('SELECT * FROM emi_schedule WHERE id = $1', [actualEmiScheduleId]);
       if (emi.rows.length > 0) {
         const emiData = emi.rows[0];
         const emiDue = parseFloat(emiData.emi_amount) - parseFloat(emiData.paid_amount || 0);
@@ -383,7 +392,7 @@ router.post('/:id/pay', async (req, res) => {
             status = $1, paid_amount = $2, paid_date = $3, payment_mode = $4, payment_reference = $5,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = $6
-        `, [status, newPaidAmount, payment_date, payment_mode, payment_reference, emi_schedule_id]);
+        `, [status, newPaidAmount, payment_date, payment_mode, actualPaymentReference, actualEmiScheduleId]);
 
         remainingPayment -= payingAmount;
       }
@@ -414,7 +423,7 @@ router.post('/:id/pay', async (req, res) => {
             status = $1, paid_amount = $2, paid_date = $3, payment_mode = $4, payment_reference = $5,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = $6
-        `, [status, newPaidAmount, payment_date, payment_mode, payment_reference, emi.id]);
+        `, [status, newPaidAmount, payment_date, payment_mode, actualPaymentReference, emi.id]);
 
         remainingPayment -= payingAmount;
       }
@@ -425,8 +434,8 @@ router.post('/:id/pay', async (req, res) => {
         loan_id, emi_schedule_id, payment_date, payment_amount, principal_paid, interest_paid,
         payment_mode, payment_reference, bank_account_id, notes, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    `, [loanId, emi_schedule_id, payment_date, payment_amount, principalPaid, interestPaid,
-        payment_mode, payment_reference, bank_account_id, notes, req.user.id]);
+    `, [loanId, actualEmiScheduleId, payment_date, actualPaymentAmount, principalPaid, interestPaid,
+        payment_mode, actualPaymentReference, bank_account_id, notes, req.user.id]);
 
     const newTotalPaid = parseFloat(loanData.total_paid) + parseFloat(payment_amount);
     const newPrincipalPaid = parseFloat(loanData.principal_paid) + principalPaid;
