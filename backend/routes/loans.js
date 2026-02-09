@@ -235,18 +235,24 @@ router.post('/', async (req, res) => {
     const {
       loan_name, truck_id, asset_type, lender_type, lender_name, lender_branch,
       loan_account_number, loan_type, principal_amount, interest_rate, interest_type,
-      tenure_months, emi_amount, emi_start_date, emi_day, sanction_date, disbursement_date,
+      tenure_months, loan_term_months, emi_amount, emi_start_date, start_date, emi_day, sanction_date, disbursement_date,
       processing_fee, insurance_amount, notes
     } = req.body;
 
-    const calculatedEMI = emi_amount || calculateEMI(principal_amount, interest_rate, tenure_months, interest_type);
+    // Handle field name aliases from frontend
+    const actualTenure = tenure_months || loan_term_months;
+    const actualStartDate = emi_start_date || start_date;
+    const actualLoanName = loan_name || `${lender_name} - ${loan_type || 'Loan'}`;
+    const actualLenderType = lender_type || 'bank';
 
-    const maturityDate = new Date(emi_start_date);
-    maturityDate.setMonth(maturityDate.getMonth() + tenure_months - 1);
+    const calculatedEMI = emi_amount || calculateEMI(principal_amount, interest_rate, actualTenure, interest_type);
 
-    // Default disbursement_date and sanction_date to emi_start_date if not provided
-    const actualDisbursementDate = disbursement_date || emi_start_date;
-    const actualSanctionDate = sanction_date || emi_start_date;
+    const maturityDate = new Date(actualStartDate);
+    maturityDate.setMonth(maturityDate.getMonth() + actualTenure - 1);
+
+    // Default disbursement_date and sanction_date to actualStartDate if not provided
+    const actualDisbursementDate = disbursement_date || actualStartDate;
+    const actualSanctionDate = sanction_date || actualStartDate;
 
     const loanResult = await client.query(`
       INSERT INTO loans (
@@ -258,16 +264,16 @@ router.post('/', async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $9, $12, $14, $19, $20, $21, $22)
       RETURNING *
     `, [
-      loan_name, truck_id || null, asset_type, lender_type, lender_name, lender_branch,
-      loan_account_number, loan_type, principal_amount, interest_rate, interest_type,
-      tenure_months, calculatedEMI, emi_start_date, emi_day || 1, actualSanctionDate, actualDisbursementDate,
+      actualLoanName, truck_id || null, asset_type || 'other', actualLenderType, lender_name, lender_branch,
+      loan_account_number, loan_type || 'term_loan', principal_amount, interest_rate, interest_type || 'reducing',
+      actualTenure, calculatedEMI, actualStartDate, emi_day || 1, actualSanctionDate, actualDisbursementDate,
       maturityDate.toISOString().split('T')[0], processing_fee || 0, insurance_amount || 0, notes, req.user.id
     ]);
 
     const loanId = loanResult.rows[0].id;
 
     const schedule = generateEMISchedule(
-      principal_amount, interest_rate, tenure_months, emi_start_date, calculatedEMI, interest_type
+      principal_amount, interest_rate, actualTenure, actualStartDate, calculatedEMI, interest_type || 'reducing'
     );
 
     for (const emi of schedule) {
