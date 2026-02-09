@@ -105,9 +105,24 @@ router.get('/stats/summary', async (req, res) => {
       AND es.due_date < CURRENT_DATE
       ORDER BY es.due_date
     `);
+    // Aggregate additional summary metrics
+    const thisMonthEmi = upcomingEmis.rows.reduce((sum, row) => sum + Number(row.emi_amount || 0), 0);
+    const overdueAmount = overdueEmis.rows.reduce((sum, row) => {
+      const emiAmt = Number(row.emi_amount || 0);
+      const paidAmt = Number(row.paid_amount || 0);
+      return sum + Math.max(0, emiAmt - paidAmt);
+    }, 0);
+    const overdueCount = overdueEmis.rows.length;
+
+    const summary = {
+      ...result.rows[0],
+      this_month_emi: thisMonthEmi,
+      overdue_amount: overdueAmount,
+      overdue_emis: overdueCount
+    };
 
     res.json({
-      summary: result.rows[0],
+      summary,
       upcoming_emis: upcomingEmis.rows,
       overdue_emis: overdueEmis.rows
     });

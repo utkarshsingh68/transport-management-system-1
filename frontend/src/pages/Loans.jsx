@@ -70,7 +70,7 @@ const Loans = () => {
   const fetchSummary = async () => {
     try {
       const res = await api.get('/loans/stats/summary');
-      setSummary(res.data);
+      setSummary(res.data.summary);
     } catch (error) {
       console.error('Error fetching summary:', error);
     }
