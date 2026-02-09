@@ -120,9 +120,14 @@ router.get('/stats/summary', async (req, res) => {
 // Calculate EMI (utility endpoint)
 router.post('/calculate-emi', async (req, res) => {
   try {
-    const { principal, rate, tenure, interest_type } = req.body;
-    const emi = calculateEMI(principal, rate, tenure, interest_type || 'reducing');
-    const schedule = generateEMISchedule(principal, rate, tenure, new Date().toISOString().split('T')[0], emi, interest_type || 'reducing');
+    const { principal, rate, annual_interest_rate, tenure, tenure_months, interest_type } = req.body;
+    
+    // Handle field name aliases from frontend
+    const actualRate = rate || annual_interest_rate;
+    const actualTenure = tenure || tenure_months;
+    
+    const emi = calculateEMI(principal, actualRate, actualTenure, interest_type || 'reducing');
+    const schedule = generateEMISchedule(principal, actualRate, actualTenure, new Date().toISOString().split('T')[0], emi, interest_type || 'reducing');
 
     const totalInterest = schedule.reduce((sum, s) => sum + s.interest_component, 0);
     const totalAmount = principal + totalInterest;
