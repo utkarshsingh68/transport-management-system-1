@@ -518,12 +518,20 @@ const EMI_COLUMN_PATTERNS = {
   principal_amount: ['principal', 'loan_amount', 'sanctioned', 'amount', 'loan'],
   interest_rate: ['interest', 'rate', 'roi', 'interest_rate', '%'],
   tenure_months: ['tenure', 'months', 'period', 'term', 'duration'],
-  emi_amount: ['emi', 'installment', 'monthly', 'emi_amount'],
+  emi_amount: ['emi', 'installment', 'monthly', 'emi_amount', 'instl'],
   start_date: ['start_date', 'disbursement', 'disburse', 'from_date', 'emi_start'],
-  outstanding: ['outstanding', 'balance', 'remaining', 'pending'],
-  paid_emis: ['paid_emis', 'emis_paid', 'paid', 'completed'],
+  outstanding: ['outstanding', 'balance', 'remaining', 'pending', 'closing'],
+  paid_emis: ['paid_emis', 'emis_paid', 'completed'],
   loan_type: ['type', 'loan_type', 'category'],
-  notes: ['notes', 'remarks', 'description', 'comment']
+  notes: ['notes', 'remarks', 'description', 'comment'],
+  // EMI Schedule format columns
+  instl_num: ['instl', 'inst', 'emi_no', 'emi_number', 'sr', 'sno', 's.no', 'no.'],
+  due_date: ['due_date', 'due', 'date', 'emi_date'],
+  opening_principal: ['opening', 'open_principal', 'opening_balance', 'open_bal'],
+  principal_component: ['principal', 'prin', 'principal_amount', 'principal_(₹)'],
+  interest_component: ['interest', 'int', 'interest_amount', 'interest_(₹)'],
+  closing_principal: ['closing', 'close_principal', 'closing_balance', 'close_bal'],
+  paid_status: ['paid', 'status', 'payment_status', 'is_paid']
 };
 
 // Detect column type from header
@@ -667,12 +675,8 @@ router.post('/import/execute', upload.single('file'), async (req, res, next) => 
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const { columnMapping } = req.body;
+    const { columnMapping, lenderName: providedLenderName, loanAccountNumber: providedAccountNumber } = req.body;
     const mapping = typeof columnMapping === 'string' ? JSON.parse(columnMapping) : columnMapping;
-
-    if (!mapping.lender_name || !mapping.principal_amount || !mapping.emi_amount) {
-      return res.status(400).json({ error: 'Lender Name, Principal Amount, and EMI Amount columns are required' });
-    }
 
     const workbook = new ExcelJS.Workbook();
     if (req.file.originalname.match(/\.csv$/i)) {
@@ -682,6 +686,9 @@ router.post('/import/execute', upload.single('file'), async (req, res, next) => 
     }
 
     const worksheet = workbook.worksheets[0];
+    
+    // Detect if this is an EMI Schedule format (has instl_num, due_date, etc.)
+    const isEMIScheduleFormat = mapping.instl_num || mapping.due_date || mapping.opening_principal;
     
     // Get trucks for matching
     const trucksResult = await client.query('SELECT id, truck_number FROM trucks');
@@ -694,46 +701,90 @@ router.post('/import/execute', upload.single('file'), async (req, res, next) => 
 
     const results = { success: 0, failed: 0, skipped: 0, errors: [] };
 
-    for (let i = 2; i <= worksheet.rowCount; i++) {
-      const row = worksheet.getRow(i);
-      
+    if (isEMIScheduleFormat) {
+      // EMI Schedule Import - creates ONE loan from the schedule data
       try {
-        const lenderName = mapping.lender_name ? row.getCell(parseInt(mapping.lender_name)).value?.toString() : null;
-        if (!lenderName) {
-          results.skipped++;
-          continue;
-        }
+        const scheduleRows = [];
+        let principalAmount = 0;
+        let emiAmount = 0;
+        let interestRate = 0;
+        let firstDueDate = null;
+        let paidCount = 0;
 
-        const principalAmount = parseNumber(mapping.principal_amount ? row.getCell(parseInt(mapping.principal_amount)).value : 0) || 0;
-        const emiAmount = parseNumber(mapping.emi_amount ? row.getCell(parseInt(mapping.emi_amount)).value : 0) || 0;
-        
-        if (principalAmount <= 0 || emiAmount <= 0) {
-          results.errors.push({ row: i, error: 'Invalid principal or EMI amount' });
-          results.failed++;
-          continue;
-        }
-
-        const interestRate = parseNumber(mapping.interest_rate ? row.getCell(parseInt(mapping.interest_rate)).value : 0) || 10;
-        const tenureMonths = parseNumber(mapping.tenure_months ? row.getCell(parseInt(mapping.tenure_months)).value : 0) || Math.ceil(principalAmount / emiAmount);
-        const startDateRaw = mapping.start_date ? row.getCell(parseInt(mapping.start_date)).value : null;
-        const startDate = parseDate(startDateRaw) || new Date().toISOString().split('T')[0];
-        const outstanding = parseNumber(mapping.outstanding ? row.getCell(parseInt(mapping.outstanding)).value : 0) || principalAmount;
-        const paidEmis = parseNumber(mapping.paid_emis ? row.getCell(parseInt(mapping.paid_emis)).value : 0) || 0;
-        const loanAccountNumber = mapping.loan_account_number ? row.getCell(parseInt(mapping.loan_account_number)).value?.toString() : '';
-        const notes = mapping.notes ? row.getCell(parseInt(mapping.notes)).value?.toString() : '';
-        const loanType = mapping.loan_type ? row.getCell(parseInt(mapping.loan_type)).value?.toString()?.toLowerCase() : 'vehicle';
-
-        // Match truck
-        let truckId = null;
-        if (mapping.truck_number) {
-          const truckNum = row.getCell(parseInt(mapping.truck_number)).value?.toString();
-          if (truckNum) {
-            truckId = truckMap[truckNum.toLowerCase().replace(/\s/g, '')] || null;
+        // Parse all rows to build the schedule
+        for (let i = 2; i <= worksheet.rowCount; i++) {
+          const row = worksheet.getRow(i);
+          
+          const emiNumber = parseNumber(mapping.instl_num ? row.getCell(parseInt(mapping.instl_num)).value : i - 1) || (i - 1);
+          const dueDateRaw = mapping.due_date ? row.getCell(parseInt(mapping.due_date)).value : null;
+          const dueDate = parseDate(dueDateRaw);
+          
+          if (!dueDate) continue; // Skip rows without valid due date
+          
+          const openingPrincipal = parseNumber(mapping.opening_principal ? row.getCell(parseInt(mapping.opening_principal)).value : 0) || 0;
+          const emi = parseNumber(mapping.emi_amount ? row.getCell(parseInt(mapping.emi_amount)).value : 0) || 0;
+          const principalComp = parseNumber(mapping.principal_component ? row.getCell(parseInt(mapping.principal_component)).value : 0) || 0;
+          const interestComp = parseNumber(mapping.interest_component ? row.getCell(parseInt(mapping.interest_component)).value : 0) || 0;
+          const closingPrincipal = parseNumber(mapping.closing_principal ? row.getCell(parseInt(mapping.closing_principal)).value : 0) || 0;
+          const rate = parseNumber(mapping.interest_rate ? row.getCell(parseInt(mapping.interest_rate)).value : 0) || 0;
+          
+          // Check paid status
+          let isPaid = false;
+          if (mapping.paid_status) {
+            const paidValue = row.getCell(parseInt(mapping.paid_status)).value?.toString()?.toLowerCase() || '';
+            isPaid = paidValue === 'yes' || paidValue === 'y' || paidValue === 'paid' || paidValue === '1' || paidValue === 'true';
           }
+          
+          if (isPaid) paidCount++;
+
+          // Use first row to get principal amount
+          if (scheduleRows.length === 0) {
+            principalAmount = openingPrincipal;
+            firstDueDate = dueDate;
+          }
+          
+          // Use EMI amount if available
+          if (emi > 0 && emiAmount === 0) {
+            emiAmount = emi;
+          } else if (principalComp > 0 && interestComp > 0 && emiAmount === 0) {
+            emiAmount = principalComp + interestComp;
+          }
+          
+          // Use interest rate if available
+          if (rate > 0 && interestRate === 0) {
+            interestRate = rate;
+          }
+
+          scheduleRows.push({
+            emi_number: emiNumber,
+            due_date: dueDate,
+            opening_balance: openingPrincipal,
+            emi_amount: emi || (principalComp + interestComp),
+            principal_component: Math.abs(principalComp),
+            interest_component: interestComp,
+            closing_balance: closingPrincipal,
+            is_paid: isPaid
+          });
+        }
+
+        if (scheduleRows.length === 0) {
+          throw new Error('No valid EMI schedule rows found');
+        }
+
+        const tenureMonths = scheduleRows.length;
+        const lenderName = providedLenderName || 'Imported Loan';
+        const loanAccountNumber = providedAccountNumber || '';
+        
+        // Calculate outstanding from last row or unpaid EMIs
+        const lastRow = scheduleRows[scheduleRows.length - 1];
+        let outstanding = lastRow.closing_balance || 0;
+        if (paidCount < scheduleRows.length) {
+          const firstUnpaid = scheduleRows.find(r => !r.is_paid);
+          if (firstUnpaid) outstanding = firstUnpaid.opening_balance;
         }
 
         // Calculate maturity date
-        const maturityDate = new Date(startDate);
+        const maturityDate = new Date(firstDueDate);
         maturityDate.setMonth(maturityDate.getMonth() + tenureMonths);
 
         // Insert loan
@@ -747,50 +798,149 @@ router.post('/import/execute', upload.single('file'), async (req, res, next) => 
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
           RETURNING id
         `, [
-          `${lenderName} Loan`, truckId, 'bank', lenderName, loanAccountNumber,
-          loanType, principalAmount, interestRate, 'reducing', tenureMonths,
-          emiAmount, startDate, startDate, maturityDate.toISOString().split('T')[0],
-          paidEmis * emiAmount, outstanding, paidEmis, tenureMonths - paidEmis,
-          outstanding <= 0 ? 'closed' : 'active', notes, req.user.id
+          `${lenderName} Loan`, null, 'bank', lenderName, loanAccountNumber,
+          'vehicle', principalAmount, interestRate, 'reducing', tenureMonths,
+          emiAmount, firstDueDate, firstDueDate, maturityDate.toISOString().split('T')[0],
+          paidCount * emiAmount, outstanding, paidCount, tenureMonths - paidCount,
+          outstanding <= 0 ? 'closed' : 'active', `Imported from ${req.file.originalname}`, req.user.id
         ]);
 
         const loanId = loanResult.rows[0].id;
 
-        // Generate EMI schedule
-        let balance = principalAmount;
-        const monthlyRate = interestRate / 12 / 100;
-        const scheduleStart = new Date(startDate);
-
-        for (let j = 1; j <= tenureMonths; j++) {
-          const dueDate = new Date(scheduleStart);
-          dueDate.setMonth(dueDate.getMonth() + j - 1);
-
-          const interestComponent = balance * monthlyRate;
-          const principalComponent = emiAmount - interestComponent;
-          const openingBalance = balance;
-          balance = Math.max(0, balance - principalComponent);
-
-          const isPaid = j <= paidEmis;
-
+        // Insert EMI schedule from parsed rows
+        for (const emi of scheduleRows) {
           await client.query(`
             INSERT INTO emi_schedule (
               loan_id, emi_number, due_date, emi_amount, principal_component, interest_component,
               opening_balance, closing_balance, status, paid_amount, paid_date
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           `, [
-            loanId, j, dueDate.toISOString().split('T')[0], emiAmount,
-            Math.round(principalComponent * 100) / 100, Math.round(interestComponent * 100) / 100,
-            Math.round(openingBalance * 100) / 100, Math.round(balance * 100) / 100,
-            isPaid ? 'paid' : (dueDate < new Date() ? 'overdue' : 'pending'),
-            isPaid ? emiAmount : 0, isPaid ? dueDate.toISOString().split('T')[0] : null
+            loanId, 
+            emi.emi_number, 
+            emi.due_date, 
+            Math.round(emi.emi_amount * 100) / 100,
+            Math.round(emi.principal_component * 100) / 100, 
+            Math.round(emi.interest_component * 100) / 100,
+            Math.round(emi.opening_balance * 100) / 100, 
+            Math.round(emi.closing_balance * 100) / 100,
+            emi.is_paid ? 'paid' : (new Date(emi.due_date) < new Date() ? 'overdue' : 'pending'),
+            emi.is_paid ? Math.round(emi.emi_amount * 100) / 100 : 0, 
+            emi.is_paid ? emi.due_date : null
           ]);
         }
 
-        results.success++;
+        results.success = 1;
+        results.message = `Created loan with ${scheduleRows.length} EMI schedule entries, ${paidCount} marked as paid`;
 
-      } catch (rowError) {
-        results.errors.push({ row: i, error: rowError.message });
-        results.failed++;
+      } catch (scheduleError) {
+        results.errors.push({ row: 0, error: scheduleError.message });
+        results.failed = 1;
+      }
+
+    } else {
+      // Standard Loan Import - each row is a separate loan
+      if (!mapping.lender_name || !mapping.principal_amount || !mapping.emi_amount) {
+        return res.status(400).json({ error: 'Lender Name, Principal Amount, and EMI Amount columns are required' });
+      }
+
+      for (let i = 2; i <= worksheet.rowCount; i++) {
+        const row = worksheet.getRow(i);
+        
+        try {
+          const lenderName = mapping.lender_name ? row.getCell(parseInt(mapping.lender_name)).value?.toString() : null;
+          if (!lenderName) {
+            results.skipped++;
+            continue;
+          }
+
+          const principalAmount = parseNumber(mapping.principal_amount ? row.getCell(parseInt(mapping.principal_amount)).value : 0) || 0;
+          const emiAmount = parseNumber(mapping.emi_amount ? row.getCell(parseInt(mapping.emi_amount)).value : 0) || 0;
+          
+          if (principalAmount <= 0 || emiAmount <= 0) {
+            results.errors.push({ row: i, error: 'Invalid principal or EMI amount' });
+            results.failed++;
+            continue;
+          }
+
+          const interestRate = parseNumber(mapping.interest_rate ? row.getCell(parseInt(mapping.interest_rate)).value : 0) || 10;
+          const tenureMonths = parseNumber(mapping.tenure_months ? row.getCell(parseInt(mapping.tenure_months)).value : 0) || Math.ceil(principalAmount / emiAmount);
+          const startDateRaw = mapping.start_date ? row.getCell(parseInt(mapping.start_date)).value : null;
+          const startDate = parseDate(startDateRaw) || new Date().toISOString().split('T')[0];
+          const outstanding = parseNumber(mapping.outstanding ? row.getCell(parseInt(mapping.outstanding)).value : 0) || principalAmount;
+          const paidEmis = parseNumber(mapping.paid_emis ? row.getCell(parseInt(mapping.paid_emis)).value : 0) || 0;
+          const loanAccountNumber = mapping.loan_account_number ? row.getCell(parseInt(mapping.loan_account_number)).value?.toString() : '';
+          const notes = mapping.notes ? row.getCell(parseInt(mapping.notes)).value?.toString() : '';
+          const loanType = mapping.loan_type ? row.getCell(parseInt(mapping.loan_type)).value?.toString()?.toLowerCase() : 'vehicle';
+
+          // Match truck
+          let truckId = null;
+          if (mapping.truck_number) {
+            const truckNum = row.getCell(parseInt(mapping.truck_number)).value?.toString();
+            if (truckNum) {
+              truckId = truckMap[truckNum.toLowerCase().replace(/\s/g, '')] || null;
+            }
+          }
+
+          // Calculate maturity date
+          const maturityDate = new Date(startDate);
+          maturityDate.setMonth(maturityDate.getMonth() + tenureMonths);
+
+          // Insert loan
+          const loanResult = await client.query(`
+            INSERT INTO loans (
+              loan_name, truck_id, lender_type, lender_name, loan_account_number,
+              loan_type, principal_amount, interest_rate, interest_type, tenure_months,
+              emi_amount, emi_start_date, disbursement_date, maturity_date,
+              total_paid, outstanding_amount, emis_paid, emis_remaining,
+              status, notes, created_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            RETURNING id
+          `, [
+            `${lenderName} Loan`, truckId, 'bank', lenderName, loanAccountNumber,
+            loanType, principalAmount, interestRate, 'reducing', tenureMonths,
+            emiAmount, startDate, startDate, maturityDate.toISOString().split('T')[0],
+            paidEmis * emiAmount, outstanding, paidEmis, tenureMonths - paidEmis,
+            outstanding <= 0 ? 'closed' : 'active', notes, req.user.id
+          ]);
+
+          const loanId = loanResult.rows[0].id;
+
+          // Generate EMI schedule
+          let balance = principalAmount;
+          const monthlyRate = interestRate / 12 / 100;
+          const scheduleStart = new Date(startDate);
+
+          for (let j = 1; j <= tenureMonths; j++) {
+            const dueDate = new Date(scheduleStart);
+            dueDate.setMonth(dueDate.getMonth() + j - 1);
+
+            const interestComponent = balance * monthlyRate;
+            const principalComponent = emiAmount - interestComponent;
+            const openingBalance = balance;
+            balance = Math.max(0, balance - principalComponent);
+
+            const isPaid = j <= paidEmis;
+
+            await client.query(`
+              INSERT INTO emi_schedule (
+                loan_id, emi_number, due_date, emi_amount, principal_component, interest_component,
+                opening_balance, closing_balance, status, paid_amount, paid_date
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `, [
+              loanId, j, dueDate.toISOString().split('T')[0], emiAmount,
+              Math.round(principalComponent * 100) / 100, Math.round(interestComponent * 100) / 100,
+              Math.round(openingBalance * 100) / 100, Math.round(balance * 100) / 100,
+              isPaid ? 'paid' : (dueDate < new Date() ? 'overdue' : 'pending'),
+              isPaid ? emiAmount : 0, isPaid ? dueDate.toISOString().split('T')[0] : null
+            ]);
+          }
+
+          results.success++;
+
+        } catch (rowError) {
+          results.errors.push({ row: i, error: rowError.message });
+          results.failed++;
+        }
       }
     }
 

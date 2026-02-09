@@ -43,6 +43,8 @@ const Loans = () => {
   const [columnMapping, setColumnMapping] = useState({});
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState(null);
+  const [importLenderName, setImportLenderName] = useState('');
+  const [importAccountNumber, setImportAccountNumber] = useState('');
 
   useEffect(() => {
     fetchLoans();
@@ -240,14 +242,29 @@ const Loans = () => {
   };
 
   const handleImport = async () => {
-    if (!importFile || !columnMapping.lender_name) {
-      toast.error('Please select a Lender Name column');
-      return;
-    }
+    // Detect if EMI schedule format
+    const isScheduleFormat = columnMapping.instl_num || columnMapping.due_date || columnMapping.opening_principal;
     
-    if (!columnMapping.principal_amount || !columnMapping.emi_amount) {
-      toast.error('Please select Principal Amount and EMI Amount columns');
-      return;
+    if (isScheduleFormat) {
+      // EMI Schedule format validation
+      if (!columnMapping.due_date) {
+        toast.error('Please select Due Date column');
+        return;
+      }
+      if (!importLenderName.trim()) {
+        toast.error('Please enter Lender/Bank Name');
+        return;
+      }
+    } else {
+      // Standard format validation
+      if (!columnMapping.lender_name) {
+        toast.error('Please select a Lender Name column');
+        return;
+      }
+      if (!columnMapping.principal_amount || !columnMapping.emi_amount) {
+        toast.error('Please select Principal Amount and EMI Amount columns');
+        return;
+      }
     }
     
     setImporting(true);
@@ -258,13 +275,19 @@ const Loans = () => {
       formData.append('file', importFile);
       formData.append('columnMapping', JSON.stringify(columnMapping));
       
+      // Add lender info for EMI schedule format
+      if (isScheduleFormat) {
+        formData.append('lenderName', importLenderName.trim());
+        formData.append('loanAccountNumber', importAccountNumber.trim());
+      }
+      
       const response = await api.post('/loans/import/execute', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
       setImportResults(response.data.results);
       setImportStep('done');
-      toast.success(`Import completed: ${response.data.results.success} loans created`);
+      toast.success(`Import completed: ${response.data.results.success} loan(s) created`);
       
       fetchLoans();
       fetchSummary();
@@ -283,6 +306,8 @@ const Loans = () => {
     setImportAnalysis(null);
     setColumnMapping({});
     setImportResults(null);
+    setImportLenderName('');
+    setImportAccountNumber('');
   };
 
   const downloadTemplate = async () => {
@@ -298,7 +323,8 @@ const Loans = () => {
     }
   };
 
-  const IMPORT_COLUMN_TYPES = [
+  // Standard loan import columns
+  const STANDARD_COLUMN_TYPES = [
     { key: 'lender_name', label: 'Lender/Bank Name', required: true },
     { key: 'principal_amount', label: 'Principal Amount', required: true },
     { key: 'emi_amount', label: 'EMI Amount', required: true },
@@ -311,6 +337,26 @@ const Loans = () => {
     { key: 'paid_emis', label: 'EMIs Already Paid' },
     { key: 'notes', label: 'Notes/Remarks' }
   ];
+
+  // EMI Schedule format columns (like your Google Sheet)
+  const EMI_SCHEDULE_COLUMN_TYPES = [
+    { key: 'instl_num', label: 'Instl/EMI Number', required: true },
+    { key: 'due_date', label: 'Due Date', required: true },
+    { key: 'opening_principal', label: 'Opening Principal' },
+    { key: 'emi_amount', label: 'Instl./EMI Amount' },
+    { key: 'principal_component', label: 'Principal Component' },
+    { key: 'interest_component', label: 'Interest Component' },
+    { key: 'closing_principal', label: 'Closing Principal' },
+    { key: 'interest_rate', label: 'Rate (%)' },
+    { key: 'paid_status', label: 'Paid Status (YES/NO)' }
+  ];
+
+  // Detect if EMI schedule format based on column mapping
+  const isEMIScheduleFormat = importAnalysis && (
+    columnMapping.instl_num || columnMapping.due_date || columnMapping.opening_principal
+  );
+
+  const IMPORT_COLUMN_TYPES = isEMIScheduleFormat ? EMI_SCHEDULE_COLUMN_TYPES : STANDARD_COLUMN_TYPES;
 
   if (loading) {
     return (
@@ -924,12 +970,55 @@ const Loans = () => {
                         <p className="text-sm text-gray-600">{importAnalysis.totalRows} rows found</p>
                       </div>
                     </div>
+                    {isEMIScheduleFormat && (
+                      <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium">
+                        EMI Schedule Format Detected
+                      </span>
+                    )}
                   </div>
+
+                  {/* Lender Info for EMI Schedule Format */}
+                  {isEMIScheduleFormat && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-4">
+                      <h3 className="text-lg font-semibold text-blue-800">Loan Details</h3>
+                      <p className="text-sm text-blue-600">Since this is an EMI schedule, please provide the loan details:</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Lender/Bank Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={importLenderName}
+                            onChange={(e) => setImportLenderName(e.target.value)}
+                            placeholder="e.g., AXIS Bank, HDFC, etc."
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Loan Account Number
+                          </label>
+                          <input
+                            type="text"
+                            value={importAccountNumber}
+                            onChange={(e) => setImportAccountNumber(e.target.value)}
+                            placeholder="e.g., CVR014212937909"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Column Mapping */}
                   <div>
                     <h3 className="text-lg font-semibold mb-3">Column Mapping</h3>
-                    <p className="text-sm text-gray-500 mb-4">We've auto-detected columns. Verify or adjust:</p>
+                    <p className="text-sm text-gray-500 mb-4">
+                      {isEMIScheduleFormat 
+                        ? 'Map your EMI schedule columns below:' 
+                        : "We've auto-detected columns. Verify or adjust:"}
+                    </p>
                     
                     <div className="grid grid-cols-2 gap-4">
                       {IMPORT_COLUMN_TYPES.map(col => (
@@ -1009,10 +1098,16 @@ const Loans = () => {
                     </button>
                     <button
                       onClick={handleImport}
-                      disabled={!columnMapping.lender_name || !columnMapping.principal_amount || !columnMapping.emi_amount}
+                      disabled={
+                        isEMIScheduleFormat 
+                          ? (!columnMapping.due_date || !importLenderName.trim())
+                          : (!columnMapping.lender_name || !columnMapping.principal_amount || !columnMapping.emi_amount)
+                      }
                       className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Import {importAnalysis.totalRows} Loans
+                      {isEMIScheduleFormat 
+                        ? `Import EMI Schedule (${importAnalysis.totalRows} entries)`
+                        : `Import ${importAnalysis.totalRows} Loans`}
                     </button>
                   </div>
                 </div>
