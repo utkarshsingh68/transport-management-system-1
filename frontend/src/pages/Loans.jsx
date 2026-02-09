@@ -546,16 +546,29 @@ const Loans = () => {
 
             {/* Progress Bar */}
             <div className="mt-4">
-              <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span>Progress: {loan.paid_emis}/{loan.total_emis} EMIs</span>
-                <span>{Math.round((loan.paid_emis / loan.total_emis) * 100)}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-green-600 h-2 rounded-full" 
-                  style={{ width: `${(loan.paid_emis / loan.total_emis) * 100}%` }}
-                ></div>
-              </div>
+              {(() => {
+                const paidEmis = loan.emis_paid || 0;
+                const remainingEmis = loan.emis_remaining || 0;
+                const totalEmis = paidEmis + remainingEmis || loan.tenure_months || 0;
+                const progress = totalEmis > 0 ? Math.min(100, Math.round((paidEmis / totalEmis) * 100)) : 0;
+
+                return (
+                  <>
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>
+                        Progress: {paidEmis}/{totalEmis || '-'} EMIs
+                      </span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-green-600 h-2 rounded-full"
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         ))}
