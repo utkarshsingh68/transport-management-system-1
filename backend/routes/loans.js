@@ -332,23 +332,33 @@ router.put('/:id', async (req, res) => {
 
     const {
       loan_name, truck_id, asset_type, lender_type, lender_name, lender_branch,
-      loan_account_number, loan_type, sanction_date, processing_fee, insurance_amount, notes
+      loan_account_number, loan_type, sanction_date, processing_fee, insurance_amount, notes,
+      // Also accept frontend field names
+      interest_type, interest_rate, principal_amount, tenure_months, loan_term_months, 
+      emi_amount, emi_start_date, start_date
     } = req.body;
 
-    // Merge incoming values with existing row; only override when provided
+    // Helper to check if value is meaningfully provided (not null, undefined, or empty string)
+    const hasValue = (val) => val !== null && val !== undefined && val !== '';
+
+    // Merge incoming values with existing row; only override when provided with actual value
     const updated = {
-      loan_name: loan_name ?? existing.loan_name,
-      truck_id: (typeof truck_id !== 'undefined' && truck_id !== '') ? truck_id : existing.truck_id,
-      asset_type: asset_type ?? existing.asset_type,
-      lender_type: lender_type ?? existing.lender_type,
-      lender_name: lender_name ?? existing.lender_name,
-      lender_branch: lender_branch ?? existing.lender_branch,
-      loan_account_number: loan_account_number ?? existing.loan_account_number,
-      loan_type: loan_type ?? existing.loan_type,
-      sanction_date: sanction_date ?? existing.sanction_date,
-      processing_fee: (typeof processing_fee !== 'undefined') ? processing_fee : existing.processing_fee,
-      insurance_amount: (typeof insurance_amount !== 'undefined') ? insurance_amount : existing.insurance_amount,
-      notes: notes ?? existing.notes
+      loan_name: hasValue(loan_name) ? loan_name : (hasValue(lender_name) ? `${lender_name} Loan` : existing.loan_name),
+      truck_id: hasValue(truck_id) ? truck_id : existing.truck_id,
+      asset_type: hasValue(asset_type) ? asset_type : existing.asset_type,
+      lender_type: hasValue(lender_type) ? lender_type : existing.lender_type,
+      lender_name: hasValue(lender_name) ? lender_name : existing.lender_name,
+      lender_branch: hasValue(lender_branch) ? lender_branch : existing.lender_branch,
+      loan_account_number: hasValue(loan_account_number) ? loan_account_number : existing.loan_account_number,
+      loan_type: hasValue(loan_type) ? loan_type : existing.loan_type,
+      sanction_date: hasValue(sanction_date) ? sanction_date : existing.sanction_date,
+      processing_fee: (typeof processing_fee === 'number' || hasValue(processing_fee)) ? processing_fee : existing.processing_fee,
+      insurance_amount: (typeof insurance_amount === 'number' || hasValue(insurance_amount)) ? insurance_amount : existing.insurance_amount,
+      notes: (notes !== undefined) ? notes : existing.notes,
+      // Additional fields from frontend
+      interest_type: hasValue(interest_type) ? interest_type : existing.interest_type,
+      interest_rate: hasValue(interest_rate) ? interest_rate : existing.interest_rate,
+      emi_start_date: hasValue(emi_start_date) ? emi_start_date : (hasValue(start_date) ? start_date : existing.emi_start_date)
     };
 
     const result = await query(`
@@ -356,8 +366,9 @@ router.put('/:id', async (req, res) => {
         loan_name = $1, truck_id = $2, asset_type = $3, lender_type = $4,
         lender_name = $5, lender_branch = $6, loan_account_number = $7, loan_type = $8,
         sanction_date = $9, processing_fee = $10, insurance_amount = $11, notes = $12,
+        interest_type = $13, interest_rate = $14, emi_start_date = $15,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $13 RETURNING *
+      WHERE id = $16 RETURNING *
     `, [
       updated.loan_name,
       updated.truck_id,
@@ -371,6 +382,9 @@ router.put('/:id', async (req, res) => {
       updated.processing_fee,
       updated.insurance_amount,
       updated.notes,
+      updated.interest_type,
+      updated.interest_rate,
+      updated.emi_start_date,
       loanId
     ]);
 
