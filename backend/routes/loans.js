@@ -317,13 +317,39 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update loan
+// Update loan (metadata-only, safe merge)
 router.put('/:id', async (req, res) => {
   try {
+    const loanId = req.params.id;
+
+    // Load existing loan to avoid overwriting required fields with null
+    const existingResult = await query('SELECT * FROM loans WHERE id = $1', [loanId]);
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Loan not found' });
+    }
+
+    const existing = existingResult.rows[0];
+
     const {
       loan_name, truck_id, asset_type, lender_type, lender_name, lender_branch,
       loan_account_number, loan_type, sanction_date, processing_fee, insurance_amount, notes
     } = req.body;
+
+    // Merge incoming values with existing row; only override when provided
+    const updated = {
+      loan_name: loan_name ?? existing.loan_name,
+      truck_id: (typeof truck_id !== 'undefined' && truck_id !== '') ? truck_id : existing.truck_id,
+      asset_type: asset_type ?? existing.asset_type,
+      lender_type: lender_type ?? existing.lender_type,
+      lender_name: lender_name ?? existing.lender_name,
+      lender_branch: lender_branch ?? existing.lender_branch,
+      loan_account_number: loan_account_number ?? existing.loan_account_number,
+      loan_type: loan_type ?? existing.loan_type,
+      sanction_date: sanction_date ?? existing.sanction_date,
+      processing_fee: (typeof processing_fee !== 'undefined') ? processing_fee : existing.processing_fee,
+      insurance_amount: (typeof insurance_amount !== 'undefined') ? insurance_amount : existing.insurance_amount,
+      notes: notes ?? existing.notes
+    };
 
     const result = await query(`
       UPDATE loans SET
@@ -332,8 +358,21 @@ router.put('/:id', async (req, res) => {
         sanction_date = $9, processing_fee = $10, insurance_amount = $11, notes = $12,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $13 RETURNING *
-    `, [loan_name, truck_id, asset_type, lender_type, lender_name, lender_branch,
-        loan_account_number, loan_type, sanction_date, processing_fee, insurance_amount, notes, req.params.id]);
+    `, [
+      updated.loan_name,
+      updated.truck_id,
+      updated.asset_type,
+      updated.lender_type,
+      updated.lender_name,
+      updated.lender_branch,
+      updated.loan_account_number,
+      updated.loan_type,
+      updated.sanction_date,
+      updated.processing_fee,
+      updated.insurance_amount,
+      updated.notes,
+      loanId
+    ]);
 
     res.json(result.rows[0]);
   } catch (error) {
