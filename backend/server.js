@@ -24,6 +24,10 @@ import documentsRoutes from './routes/documents.js';
 import paymentsRoutes from './routes/payments.js';
 import consignerLedgerRoutes from './routes/consignerLedger.js';
 import udhariRoutes from './routes/udhari.js';
+import invoicesRoutes from './routes/invoices.js';
+import bankReconciliationRoutes from './routes/bankReconciliation.js';
+import loansRoutes from './routes/loans.js';
+import ledgerImportRoutes from './routes/ledgerImport.js';
 
 dotenv.config();
 
@@ -77,6 +81,10 @@ app.use('/api/documents', documentsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/consigner-ledger', consignerLedgerRoutes);
 app.use('/api/udhari', udhariRoutes);
+app.use('/api/invoices', invoicesRoutes);
+app.use('/api/bank-reconciliation', bankReconciliationRoutes);
+app.use('/api/loans', loansRoutes);
+app.use('/api/ledger-import', ledgerImportRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

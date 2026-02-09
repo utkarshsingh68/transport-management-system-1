@@ -4,7 +4,8 @@ import {
   IndianRupee, Calendar, Building2, Truck, FileText,
   Phone, MapPin, Clock, CheckCircle, X, Download,
   RefreshCw, Filter, Eye, CreditCard, ArrowRight,
-  Route, User, Hash, Banknote, CalendarDays, TrendingUp
+  Route, User, Hash, Banknote, CalendarDays, TrendingUp,
+  Upload, FileSpreadsheet, Check, AlertCircle, Loader2
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
@@ -27,6 +28,16 @@ const Udhari = () => {
     reference_number: '',
     notes: ''
   });
+
+  // Excel Import State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importStep, setImportStep] = useState('upload'); // upload, preview, importing, done
+  const [importFile, setImportFile] = useState(null);
+  const [importAnalysis, setImportAnalysis] = useState(null);
+  const [columnMapping, setColumnMapping] = useState({});
+  const [createNewParties, setCreateNewParties] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState(null);
 
   useEffect(() => {
     fetchUdhariData();
@@ -163,6 +174,101 @@ const Udhari = () => {
     party.phone?.includes(searchTerm)
   );
 
+  // Excel Import Functions
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setImportFile(file);
+    setImportStep('preview');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await api.post('/ledger-import/analyze', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setImportAnalysis(response.data);
+      setColumnMapping(response.data.columnMapping || {});
+    } catch (error) {
+      toast.error('Failed to analyze file: ' + (error.response?.data?.error || error.message));
+      resetImport();
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile || !columnMapping.party_name) {
+      toast.error('Please select a Party Name column');
+      return;
+    }
+    
+    if (!columnMapping.debit && !columnMapping.credit && !columnMapping.amount) {
+      toast.error('Please select at least one amount column (Debit, Credit, or Amount)');
+      return;
+    }
+    
+    setImporting(true);
+    setImportStep('importing');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('columnMapping', JSON.stringify(columnMapping));
+      formData.append('createNewParties', createNewParties);
+      
+      const response = await api.post('/ledger-import/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setImportResults(response.data.results);
+      setImportStep('done');
+      toast.success(`Import completed: ${response.data.results.success} entries created`);
+      
+      // Refresh data
+      fetchUdhariData();
+    } catch (error) {
+      toast.error('Import failed: ' + (error.response?.data?.error || error.message));
+      setImportStep('preview');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resetImport = () => {
+    setShowImportModal(false);
+    setImportStep('upload');
+    setImportFile(null);
+    setImportAnalysis(null);
+    setColumnMapping({});
+    setImportResults(null);
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const response = await api.get('/ledger-import/template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'party_ledger_template.xlsx';
+      link.click();
+    } catch (error) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const COLUMN_TYPES = [
+    { key: 'party_name', label: 'Party Name', required: true },
+    { key: 'date', label: 'Date' },
+    { key: 'description', label: 'Description' },
+    { key: 'debit', label: 'Debit (Payment Received)' },
+    { key: 'credit', label: 'Credit (Amount Due)' },
+    { key: 'amount', label: 'Amount (Single Column)' },
+    { key: 'reference', label: 'Reference Number' },
+    { key: 'trip_id', label: 'Trip ID/LR Number' }
+  ];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -190,17 +296,26 @@ const Udhari = () => {
           </h1>
           <p className="text-slate-500 mt-1">Track and manage all pending payments from consigners</p>
         </div>
-        <button 
-          onClick={() => {
-            setPartyTrips({});
-            setExpandedParties({});
-            fetchUdhariData();
-          }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm hover:shadow"
-        >
-          <RefreshCw size={18} />
-          Refresh
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl hover:from-emerald-600 hover:to-green-700 transition-all shadow-lg shadow-emerald-500/25"
+          >
+            <Upload size={18} />
+            Import Excel
+          </button>
+          <button 
+            onClick={() => {
+              setPartyTrips({});
+              setExpandedParties({});
+              fetchUdhariData();
+            }}
+            className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm hover:shadow"
+          >
+            <RefreshCw size={18} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -561,6 +676,266 @@ const Udhari = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-white">
+                <FileSpreadsheet size={24} />
+                <div>
+                  <h2 className="text-xl font-bold">Smart Excel Import</h2>
+                  <p className="text-emerald-100 text-sm">Import party ledger entries from Excel/CSV</p>
+                </div>
+              </div>
+              <button onClick={resetImport} className="p-2 hover:bg-white/20 rounded-lg text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+              {/* Step 1: Upload */}
+              {importStep === 'upload' && (
+                <div className="space-y-6">
+                  <div className="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center hover:border-emerald-400 transition-colors">
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      id="excel-upload"
+                    />
+                    <label htmlFor="excel-upload" className="cursor-pointer">
+                      <Upload size={48} className="mx-auto text-slate-400 mb-4" />
+                      <p className="text-lg font-semibold text-slate-700">Click to upload or drag and drop</p>
+                      <p className="text-slate-500 mt-1">Excel (.xlsx, .xls) or CSV files supported</p>
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center justify-center gap-4">
+                    <div className="h-px bg-slate-200 flex-1"></div>
+                    <span className="text-slate-400 text-sm">OR</span>
+                    <div className="h-px bg-slate-200 flex-1"></div>
+                  </div>
+                  
+                  <button
+                    onClick={downloadTemplate}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors"
+                  >
+                    <Download size={18} />
+                    Download Sample Template
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Preview & Map Columns */}
+              {importStep === 'preview' && importAnalysis && (
+                <div className="space-y-6">
+                  {/* File Info */}
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <FileSpreadsheet className="text-emerald-600" size={24} />
+                      <div>
+                        <p className="font-semibold text-slate-800">{importAnalysis.fileName}</p>
+                        <p className="text-sm text-slate-600">{importAnalysis.totalRows} rows found</p>
+                      </div>
+                    </div>
+                    {importAnalysis.newPartiesCount > 0 && (
+                      <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-medium">
+                        {importAnalysis.newPartiesCount} new parties
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Column Mapping */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Column Mapping</h3>
+                    <p className="text-sm text-slate-500 mb-4">We've auto-detected columns. Please verify or adjust the mapping:</p>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      {COLUMN_TYPES.map(col => (
+                        <div key={col.key} className="flex items-center gap-3">
+                          <label className="w-40 text-sm font-medium text-slate-700">
+                            {col.label}
+                            {col.required && <span className="text-red-500 ml-1">*</span>}
+                          </label>
+                          <select
+                            value={columnMapping[col.key] || ''}
+                            onChange={(e) => setColumnMapping({
+                              ...columnMapping,
+                              [col.key]: e.target.value ? parseInt(e.target.value) : null
+                            })}
+                            className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+                              columnMapping[col.key] ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300'
+                            }`}
+                          >
+                            <option value="">-- Select Column --</option>
+                            {importAnalysis.headers.map(h => (
+                              <option key={h.column} value={h.column}>
+                                {h.header}
+                                {h.detectedType === col.key && ' ✓'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* New Party Handling */}
+                  {importAnalysis.newPartiesCount > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="text-yellow-600 mt-0.5" size={20} />
+                        <div>
+                          <p className="font-semibold text-slate-800">
+                            {importAnalysis.newPartiesCount} parties not found in system
+                          </p>
+                          <p className="text-sm text-slate-600 mt-1">
+                            These parties will be created automatically if you proceed.
+                          </p>
+                          <label className="flex items-center gap-2 mt-3">
+                            <input
+                              type="checkbox"
+                              checked={createNewParties}
+                              onChange={(e) => setCreateNewParties(e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm">Create new parties automatically</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Preview Table */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Data Preview (First 20 rows)</h3>
+                    <div className="border rounded-xl overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-slate-600">#</th>
+                              {importAnalysis.headers.map(h => (
+                                <th key={h.column} className="px-3 py-2 text-left font-semibold text-slate-600 whitespace-nowrap">
+                                  {h.header}
+                                  {h.detectedType && (
+                                    <span className="ml-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs">
+                                      {h.detectedType}
+                                    </span>
+                                  )}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {importAnalysis.dataRows.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="px-3 py-2 text-slate-500">{row.rowNumber}</td>
+                                {importAnalysis.headers.map(h => (
+                                  <td key={h.column} className="px-3 py-2 whitespace-nowrap">
+                                    {row.data[h.column]?.toString() || '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      onClick={resetImport}
+                      className="flex-1 px-4 py-3 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleImport}
+                      disabled={!columnMapping.party_name || (!columnMapping.debit && !columnMapping.credit && !columnMapping.amount)}
+                      className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl hover:from-emerald-600 hover:to-green-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Import {importAnalysis.totalRows} Entries
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Importing */}
+              {importStep === 'importing' && (
+                <div className="py-16 text-center">
+                  <Loader2 size={48} className="mx-auto text-emerald-600 animate-spin mb-4" />
+                  <p className="text-lg font-semibold text-slate-700">Importing entries...</p>
+                  <p className="text-slate-500 mt-1">Please wait while we process your file</p>
+                </div>
+              )}
+
+              {/* Step 4: Done */}
+              {importStep === 'done' && importResults && (
+                <div className="py-8 text-center space-y-6">
+                  <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                    <Check size={40} className="text-emerald-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-slate-800">Import Complete!</h3>
+                    <p className="text-slate-500 mt-1">Your ledger entries have been processed</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-4 gap-4 max-w-lg mx-auto">
+                    <div className="bg-emerald-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-emerald-600">{importResults.success}</p>
+                      <p className="text-xs text-slate-600">Success</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-blue-600">{importResults.newParties}</p>
+                      <p className="text-xs text-slate-600">New Parties</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-yellow-600">{importResults.skipped}</p>
+                      <p className="text-xs text-slate-600">Skipped</p>
+                    </div>
+                    <div className="bg-red-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-red-600">{importResults.failed}</p>
+                      <p className="text-xs text-slate-600">Failed</p>
+                    </div>
+                  </div>
+
+                  {importResults.errors.length > 0 && (
+                    <div className="text-left max-w-lg mx-auto">
+                      <p className="font-semibold text-slate-700 mb-2">Errors:</p>
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3 max-h-40 overflow-y-auto">
+                        {importResults.errors.slice(0, 10).map((err, idx) => (
+                          <p key={idx} className="text-sm text-red-700">
+                            Row {err.row}: {err.error}
+                          </p>
+                        ))}
+                        {importResults.errors.length > 10 && (
+                          <p className="text-sm text-red-500 mt-1">
+                            ... and {importResults.errors.length - 10} more errors
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={resetImport}
+                    className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl hover:from-emerald-600 hover:to-green-700 font-semibold"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

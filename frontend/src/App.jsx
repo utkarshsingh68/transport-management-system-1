@@ -22,6 +22,9 @@ import ProfitLoss from './pages/ProfitLoss';
 import Documents from './pages/Documents';
 import Payments from './pages/Payments';
 import Udhari from './pages/Udhari';
+import Invoices from './pages/Invoices';
+import BankReconciliation from './pages/BankReconciliation';
+import Loans from './pages/Loans';
 
 function App() {
   return (
@@ -51,6 +54,9 @@ function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="payments" element={<Payments />} />
             <Route path="udhari" element={<Udhari />} />
+            <Route path="invoices" element={<Invoices />} />
+            <Route path="bank-reconciliation" element={<BankReconciliation />} />
+            <Route path="loans" element={<Loans />} />
             <Route path="reports" element={<Reports />} />
           </Route>
         </Routes>

@@ -21,6 +21,9 @@ import {
   FileText,
   CreditCard,
   AlertTriangle,
+  FileCheck,
+  Landmark,
+  Banknote,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -48,6 +51,9 @@ const Layout = () => {
     { name: 'Salary', href: '/salary', icon: Wallet, color: 'from-teal-500 to-emerald-600' },
     { name: 'Ledger', href: '/ledger', icon: BookOpen, color: 'from-indigo-500 to-violet-600' },
     { name: 'Documents', href: '/documents', icon: FileText, color: 'from-sky-500 to-cyan-600' },
+    { name: 'GST Invoices', href: '/invoices', icon: FileCheck, color: 'from-emerald-500 to-green-600' },
+    { name: 'Bank Recon', href: '/bank-reconciliation', icon: Landmark, color: 'from-indigo-500 to-blue-600' },
+    { name: 'EMI/Loans', href: '/loans', icon: Banknote, color: 'from-amber-500 to-yellow-600' },
     { name: 'Profit & Loss', href: '/profit-loss', icon: TrendingUp, color: 'from-green-500 to-emerald-600' },
     { name: 'Reports', href: '/reports', icon: BarChart3, color: 'from-purple-500 to-indigo-600' },
   ];
