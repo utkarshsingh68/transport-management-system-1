@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { 
   Wallet, Plus, X, AlertTriangle, Check, Calendar, CreditCard,
   IndianRupee, TrendingDown, Clock, CheckCircle, Eye, DollarSign,
-  Calculator, Truck, Building2, Edit2, Trash2
+  Calculator, Truck, Building2, Edit2, Trash2, Upload, Download,
+  FileSpreadsheet, AlertCircle, Loader2
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
@@ -33,6 +34,15 @@ const Loans = () => {
     emi_id: '', amount: '', payment_date: new Date().toISOString().split('T')[0],
     payment_mode: 'bank_transfer', reference_number: ''
   });
+
+  // Excel Import State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importStep, setImportStep] = useState('upload');
+  const [importFile, setImportFile] = useState(null);
+  const [importAnalysis, setImportAnalysis] = useState(null);
+  const [columnMapping, setColumnMapping] = useState({});
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState(null);
 
   useEffect(() => {
     fetchLoans();
@@ -205,6 +215,103 @@ const Loans = () => {
     );
   };
 
+  // Excel Import Functions
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setImportFile(file);
+    setImportStep('preview');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await api.post('/loans/import/analyze', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setImportAnalysis(response.data);
+      setColumnMapping(response.data.columnMapping || {});
+    } catch (error) {
+      toast.error('Failed to analyze file: ' + (error.response?.data?.error || error.message));
+      resetImport();
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile || !columnMapping.lender_name) {
+      toast.error('Please select a Lender Name column');
+      return;
+    }
+    
+    if (!columnMapping.principal_amount || !columnMapping.emi_amount) {
+      toast.error('Please select Principal Amount and EMI Amount columns');
+      return;
+    }
+    
+    setImporting(true);
+    setImportStep('importing');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('columnMapping', JSON.stringify(columnMapping));
+      
+      const response = await api.post('/loans/import/execute', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setImportResults(response.data.results);
+      setImportStep('done');
+      toast.success(`Import completed: ${response.data.results.success} loans created`);
+      
+      fetchLoans();
+      fetchSummary();
+    } catch (error) {
+      toast.error('Import failed: ' + (error.response?.data?.error || error.message));
+      setImportStep('preview');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resetImport = () => {
+    setShowImportModal(false);
+    setImportStep('upload');
+    setImportFile(null);
+    setImportAnalysis(null);
+    setColumnMapping({});
+    setImportResults(null);
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const response = await api.get('/loans/import/template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'loan_import_template.xlsx';
+      link.click();
+    } catch (error) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const IMPORT_COLUMN_TYPES = [
+    { key: 'lender_name', label: 'Lender/Bank Name', required: true },
+    { key: 'principal_amount', label: 'Principal Amount', required: true },
+    { key: 'emi_amount', label: 'EMI Amount', required: true },
+    { key: 'loan_account_number', label: 'Loan Account Number' },
+    { key: 'truck_number', label: 'Truck Number' },
+    { key: 'interest_rate', label: 'Interest Rate (%)' },
+    { key: 'tenure_months', label: 'Tenure (Months)' },
+    { key: 'start_date', label: 'Start Date' },
+    { key: 'outstanding', label: 'Outstanding Amount' },
+    { key: 'paid_emis', label: 'EMIs Already Paid' },
+    { key: 'notes', label: 'Notes/Remarks' }
+  ];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -221,13 +328,22 @@ const Loans = () => {
           <h1 className="text-2xl font-bold text-gray-900">EMI & Loan Tracking</h1>
           <p className="text-gray-600">Manage truck loans and track EMI payments</p>
         </div>
-        <button
-          onClick={() => { setShowModal(true); setSelectedLoan(null); setForm(initialForm); }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          Add Loan
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+          >
+            <Upload size={18} />
+            Import Excel
+          </button>
+          <button
+            onClick={() => { setShowModal(true); setSelectedLoan(null); setForm(initialForm); }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={18} />
+            Add Loan
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -739,6 +855,231 @@ const Loans = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-white">
+                <FileSpreadsheet size={24} />
+                <div>
+                  <h2 className="text-xl font-bold">Import Loans from Excel</h2>
+                  <p className="text-emerald-100 text-sm">Bulk import EMI/Loan data</p>
+                </div>
+              </div>
+              <button onClick={resetImport} className="p-2 hover:bg-white/20 rounded-lg text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+              {/* Step 1: Upload */}
+              {importStep === 'upload' && (
+                <div className="space-y-6">
+                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-emerald-400 transition-colors">
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      id="loan-excel-upload"
+                    />
+                    <label htmlFor="loan-excel-upload" className="cursor-pointer">
+                      <Upload size={48} className="mx-auto text-gray-400 mb-4" />
+                      <p className="text-lg font-semibold text-gray-700">Click to upload or drag and drop</p>
+                      <p className="text-gray-500 mt-1">Excel (.xlsx, .xls) or CSV files</p>
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center justify-center gap-4">
+                    <div className="h-px bg-gray-200 flex-1"></div>
+                    <span className="text-gray-400 text-sm">OR</span>
+                    <div className="h-px bg-gray-200 flex-1"></div>
+                  </div>
+                  
+                  <button
+                    onClick={downloadTemplate}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-xl hover:bg-gray-50"
+                  >
+                    <Download size={18} />
+                    Download Sample Template
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Preview & Map Columns */}
+              {importStep === 'preview' && importAnalysis && (
+                <div className="space-y-6">
+                  {/* File Info */}
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <FileSpreadsheet className="text-emerald-600" size={24} />
+                      <div>
+                        <p className="font-semibold text-gray-800">{importAnalysis.fileName}</p>
+                        <p className="text-sm text-gray-600">{importAnalysis.totalRows} rows found</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Column Mapping */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Column Mapping</h3>
+                    <p className="text-sm text-gray-500 mb-4">We've auto-detected columns. Verify or adjust:</p>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      {IMPORT_COLUMN_TYPES.map(col => (
+                        <div key={col.key} className="flex items-center gap-3">
+                          <label className="w-44 text-sm font-medium text-gray-700">
+                            {col.label}
+                            {col.required && <span className="text-red-500 ml-1">*</span>}
+                          </label>
+                          <select
+                            value={columnMapping[col.key] || ''}
+                            onChange={(e) => setColumnMapping({
+                              ...columnMapping,
+                              [col.key]: e.target.value ? parseInt(e.target.value) : null
+                            })}
+                            className={`flex-1 px-3 py-2 border rounded-lg text-sm ${
+                              columnMapping[col.key] ? 'border-emerald-300 bg-emerald-50' : 'border-gray-300'
+                            }`}
+                          >
+                            <option value="">-- Select Column --</option>
+                            {importAnalysis.headers.map(h => (
+                              <option key={h.column} value={h.column}>
+                                {h.header}
+                                {h.detectedType === col.key && ' ✓'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preview Table */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Data Preview</h3>
+                    <div className="border rounded-xl overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-600">#</th>
+                              {importAnalysis.headers.map(h => (
+                                <th key={h.column} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">
+                                  {h.header}
+                                  {h.detectedType && (
+                                    <span className="ml-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs">
+                                      {h.detectedType}
+                                    </span>
+                                  )}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {importAnalysis.dataRows.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-3 py-2 text-gray-500">{row.rowNumber}</td>
+                                {importAnalysis.headers.map(h => (
+                                  <td key={h.column} className="px-3 py-2 whitespace-nowrap">
+                                    {row.data[h.column]?.toString() || '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      onClick={resetImport}
+                      className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleImport}
+                      disabled={!columnMapping.lender_name || !columnMapping.principal_amount || !columnMapping.emi_amount}
+                      className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Import {importAnalysis.totalRows} Loans
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Importing */}
+              {importStep === 'importing' && (
+                <div className="py-16 text-center">
+                  <Loader2 size={48} className="mx-auto text-emerald-600 animate-spin mb-4" />
+                  <p className="text-lg font-semibold text-gray-700">Importing loans...</p>
+                  <p className="text-gray-500 mt-1">Creating loans and generating EMI schedules</p>
+                </div>
+              )}
+
+              {/* Step 4: Done */}
+              {importStep === 'done' && importResults && (
+                <div className="py-8 text-center space-y-6">
+                  <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                    <Check size={40} className="text-emerald-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-gray-800">Import Complete!</h3>
+                    <p className="text-gray-500 mt-1">Loans and EMI schedules have been created</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4 max-w-md mx-auto">
+                    <div className="bg-emerald-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-emerald-600">{importResults.success}</p>
+                      <p className="text-xs text-gray-600">Success</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-yellow-600">{importResults.skipped}</p>
+                      <p className="text-xs text-gray-600">Skipped</p>
+                    </div>
+                    <div className="bg-red-50 rounded-xl p-4">
+                      <p className="text-2xl font-bold text-red-600">{importResults.failed}</p>
+                      <p className="text-xs text-gray-600">Failed</p>
+                    </div>
+                  </div>
+
+                  {importResults.errors?.length > 0 && (
+                    <div className="text-left max-w-lg mx-auto">
+                      <p className="font-semibold text-gray-700 mb-2">Errors:</p>
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3 max-h-40 overflow-y-auto">
+                        {importResults.errors.slice(0, 10).map((err, idx) => (
+                          <p key={idx} className="text-sm text-red-700">
+                            Row {err.row}: {err.error}
+                          </p>
+                        ))}
+                        {importResults.errors.length > 10 && (
+                          <p className="text-sm text-red-500 mt-1">
+                            ... and {importResults.errors.length - 10} more errors
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={resetImport}
+                    className="px-8 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-semibold"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -1,9 +1,25 @@
 import express from 'express';
+import multer from 'multer';
+import ExcelJS from 'exceljs';
 import pool, { query } from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 router.use(authenticateToken);
+
+// Configure multer for file upload
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.match(/\.(xlsx|xls|csv)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only Excel and CSV files are allowed'));
+    }
+  }
+});
 
 // Helper function to generate EMI schedule
 const generateEMISchedule = (principal, rate, tenure, startDate, emiAmount, interestType) => {
@@ -464,6 +480,363 @@ router.get('/:id/payments', async (req, res) => {
     console.error('Error fetching payment history:', error);
     res.status(500).json({ message: 'Server error' });
   }
+});
+
+// =============================================
+// EXCEL IMPORT FUNCTIONALITY
+// =============================================
+
+// Column detection patterns for EMI data
+const EMI_COLUMN_PATTERNS = {
+  lender_name: ['lender', 'bank', 'finance', 'financier', 'nbfc', 'institution'],
+  loan_account_number: ['account', 'loan_no', 'loan_number', 'a/c', 'acc_no'],
+  truck_number: ['truck', 'vehicle', 'registration', 'reg_no', 'vehicle_no'],
+  principal_amount: ['principal', 'loan_amount', 'sanctioned', 'amount', 'loan'],
+  interest_rate: ['interest', 'rate', 'roi', 'interest_rate', '%'],
+  tenure_months: ['tenure', 'months', 'period', 'term', 'duration'],
+  emi_amount: ['emi', 'installment', 'monthly', 'emi_amount'],
+  start_date: ['start_date', 'disbursement', 'disburse', 'from_date', 'emi_start'],
+  outstanding: ['outstanding', 'balance', 'remaining', 'pending'],
+  paid_emis: ['paid_emis', 'emis_paid', 'paid', 'completed'],
+  loan_type: ['type', 'loan_type', 'category'],
+  notes: ['notes', 'remarks', 'description', 'comment']
+};
+
+// Detect column type from header
+function detectEMIColumnType(header) {
+  if (!header) return null;
+  const normalized = header.toString().toLowerCase().trim().replace(/[_\-\s]+/g, '');
+  
+  for (const [type, patterns] of Object.entries(EMI_COLUMN_PATTERNS)) {
+    for (const pattern of patterns) {
+      const normalizedPattern = pattern.toLowerCase().replace(/[_\-\s]+/g, '');
+      if (normalized.includes(normalizedPattern) || normalizedPattern.includes(normalized)) {
+        return { type, confidence: 'high' };
+      }
+    }
+  }
+  return null;
+}
+
+// Parse date from various formats
+function parseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  
+  const str = value.toString().trim();
+  const formats = [
+    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
+    /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
+    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/
+  ];
+  
+  for (const format of formats) {
+    const match = str.match(format);
+    if (match) {
+      let year, month, day;
+      if (match[1].length === 4) {
+        [, year, month, day] = match;
+      } else if (match[3].length === 4) {
+        [, day, month, year] = match;
+      } else {
+        [, day, month, year] = match;
+        year = parseInt(year) > 50 ? `19${year}` : `20${year}`;
+      }
+      const date = new Date(year, parseInt(month) - 1, parseInt(day));
+      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+    }
+  }
+  
+  const date = new Date(str);
+  return !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : null;
+}
+
+// Parse numeric value
+function parseNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return value;
+  let str = value.toString().trim().replace(/[₹$,\s]/g, '');
+  const num = parseFloat(str);
+  return isNaN(num) ? null : num;
+}
+
+// Analyze uploaded Excel file
+router.post('/import/analyze', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    if (req.file.originalname.match(/\.csv$/i)) {
+      await workbook.csv.load(req.file.buffer);
+    } else {
+      await workbook.xlsx.load(req.file.buffer);
+    }
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet || worksheet.rowCount === 0) {
+      return res.status(400).json({ error: 'File is empty' });
+    }
+
+    const headerRow = worksheet.getRow(1);
+    const headers = [];
+    const columnMapping = {};
+
+    headerRow.eachCell((cell, colNumber) => {
+      const headerText = cell.value?.toString() || `Column ${colNumber}`;
+      const detection = detectEMIColumnType(headerText);
+      headers.push({
+        column: colNumber,
+        header: headerText,
+        detectedType: detection?.type || null,
+        confidence: detection?.confidence || 'none'
+      });
+      
+      if (detection && !columnMapping[detection.type]) {
+        columnMapping[detection.type] = colNumber;
+      }
+    });
+
+    // Parse preview rows
+    const dataRows = [];
+    const sampleSize = Math.min(worksheet.rowCount, 21);
+    
+    for (let i = 2; i <= sampleSize; i++) {
+      const row = worksheet.getRow(i);
+      const rowData = {};
+      let hasData = false;
+      
+      row.eachCell((cell, colNumber) => {
+        rowData[colNumber] = cell.value;
+        if (cell.value !== null && cell.value !== '') hasData = true;
+      });
+      
+      if (hasData) dataRows.push({ rowNumber: i, data: rowData });
+    }
+
+    // Get existing trucks for matching
+    const trucksResult = await query('SELECT id, truck_number FROM trucks');
+    const existingTrucks = trucksResult.rows;
+
+    res.json({
+      fileName: req.file.originalname,
+      totalRows: worksheet.rowCount - 1,
+      headers,
+      columnMapping,
+      dataRows: dataRows.slice(0, 10),
+      existingTrucks
+    });
+
+  } catch (error) {
+    console.error('Error analyzing file:', error);
+    next(error);
+  }
+});
+
+// Import loans from Excel
+router.post('/import/execute', upload.single('file'), async (req, res, next) => {
+  const client = await pool.connect();
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { columnMapping } = req.body;
+    const mapping = typeof columnMapping === 'string' ? JSON.parse(columnMapping) : columnMapping;
+
+    if (!mapping.lender_name || !mapping.principal_amount || !mapping.emi_amount) {
+      return res.status(400).json({ error: 'Lender Name, Principal Amount, and EMI Amount columns are required' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    if (req.file.originalname.match(/\.csv$/i)) {
+      await workbook.csv.load(req.file.buffer);
+    } else {
+      await workbook.xlsx.load(req.file.buffer);
+    }
+
+    const worksheet = workbook.worksheets[0];
+    
+    // Get trucks for matching
+    const trucksResult = await client.query('SELECT id, truck_number FROM trucks');
+    const truckMap = {};
+    trucksResult.rows.forEach(t => {
+      truckMap[t.truck_number.toLowerCase().replace(/\s/g, '')] = t.id;
+    });
+
+    await client.query('BEGIN');
+
+    const results = { success: 0, failed: 0, skipped: 0, errors: [] };
+
+    for (let i = 2; i <= worksheet.rowCount; i++) {
+      const row = worksheet.getRow(i);
+      
+      try {
+        const lenderName = mapping.lender_name ? row.getCell(parseInt(mapping.lender_name)).value?.toString() : null;
+        if (!lenderName) {
+          results.skipped++;
+          continue;
+        }
+
+        const principalAmount = parseNumber(mapping.principal_amount ? row.getCell(parseInt(mapping.principal_amount)).value : 0) || 0;
+        const emiAmount = parseNumber(mapping.emi_amount ? row.getCell(parseInt(mapping.emi_amount)).value : 0) || 0;
+        
+        if (principalAmount <= 0 || emiAmount <= 0) {
+          results.errors.push({ row: i, error: 'Invalid principal or EMI amount' });
+          results.failed++;
+          continue;
+        }
+
+        const interestRate = parseNumber(mapping.interest_rate ? row.getCell(parseInt(mapping.interest_rate)).value : 0) || 10;
+        const tenureMonths = parseNumber(mapping.tenure_months ? row.getCell(parseInt(mapping.tenure_months)).value : 0) || Math.ceil(principalAmount / emiAmount);
+        const startDateRaw = mapping.start_date ? row.getCell(parseInt(mapping.start_date)).value : null;
+        const startDate = parseDate(startDateRaw) || new Date().toISOString().split('T')[0];
+        const outstanding = parseNumber(mapping.outstanding ? row.getCell(parseInt(mapping.outstanding)).value : 0) || principalAmount;
+        const paidEmis = parseNumber(mapping.paid_emis ? row.getCell(parseInt(mapping.paid_emis)).value : 0) || 0;
+        const loanAccountNumber = mapping.loan_account_number ? row.getCell(parseInt(mapping.loan_account_number)).value?.toString() : '';
+        const notes = mapping.notes ? row.getCell(parseInt(mapping.notes)).value?.toString() : '';
+        const loanType = mapping.loan_type ? row.getCell(parseInt(mapping.loan_type)).value?.toString()?.toLowerCase() : 'vehicle';
+
+        // Match truck
+        let truckId = null;
+        if (mapping.truck_number) {
+          const truckNum = row.getCell(parseInt(mapping.truck_number)).value?.toString();
+          if (truckNum) {
+            truckId = truckMap[truckNum.toLowerCase().replace(/\s/g, '')] || null;
+          }
+        }
+
+        // Calculate maturity date
+        const maturityDate = new Date(startDate);
+        maturityDate.setMonth(maturityDate.getMonth() + tenureMonths);
+
+        // Insert loan
+        const loanResult = await client.query(`
+          INSERT INTO loans (
+            loan_name, truck_id, lender_type, lender_name, loan_account_number,
+            loan_type, principal_amount, interest_rate, interest_type, tenure_months,
+            emi_amount, emi_start_date, disbursement_date, maturity_date,
+            total_paid, outstanding_amount, emis_paid, emis_remaining,
+            status, notes, created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+          RETURNING id
+        `, [
+          `${lenderName} Loan`, truckId, 'bank', lenderName, loanAccountNumber,
+          loanType, principalAmount, interestRate, 'reducing', tenureMonths,
+          emiAmount, startDate, startDate, maturityDate.toISOString().split('T')[0],
+          paidEmis * emiAmount, outstanding, paidEmis, tenureMonths - paidEmis,
+          outstanding <= 0 ? 'closed' : 'active', notes, req.user.id
+        ]);
+
+        const loanId = loanResult.rows[0].id;
+
+        // Generate EMI schedule
+        let balance = principalAmount;
+        const monthlyRate = interestRate / 12 / 100;
+        const scheduleStart = new Date(startDate);
+
+        for (let j = 1; j <= tenureMonths; j++) {
+          const dueDate = new Date(scheduleStart);
+          dueDate.setMonth(dueDate.getMonth() + j - 1);
+
+          const interestComponent = balance * monthlyRate;
+          const principalComponent = emiAmount - interestComponent;
+          const openingBalance = balance;
+          balance = Math.max(0, balance - principalComponent);
+
+          const isPaid = j <= paidEmis;
+
+          await client.query(`
+            INSERT INTO emi_schedule (
+              loan_id, emi_number, due_date, emi_amount, principal_component, interest_component,
+              opening_balance, closing_balance, status, paid_amount, paid_date
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          `, [
+            loanId, j, dueDate.toISOString().split('T')[0], emiAmount,
+            Math.round(principalComponent * 100) / 100, Math.round(interestComponent * 100) / 100,
+            Math.round(openingBalance * 100) / 100, Math.round(balance * 100) / 100,
+            isPaid ? 'paid' : (dueDate < new Date() ? 'overdue' : 'pending'),
+            isPaid ? emiAmount : 0, isPaid ? dueDate.toISOString().split('T')[0] : null
+          ]);
+        }
+
+        results.success++;
+
+      } catch (rowError) {
+        results.errors.push({ row: i, error: rowError.message });
+        results.failed++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Import completed', results });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Import error:', error);
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+// Download import template
+router.get('/import/template', (req, res) => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Loan Import');
+  
+  worksheet.columns = [
+    { header: 'Lender Name', key: 'lender_name', width: 25 },
+    { header: 'Loan Account No', key: 'loan_account_number', width: 20 },
+    { header: 'Truck Number', key: 'truck_number', width: 15 },
+    { header: 'Principal Amount', key: 'principal_amount', width: 18 },
+    { header: 'Interest Rate (%)', key: 'interest_rate', width: 15 },
+    { header: 'Tenure (Months)', key: 'tenure_months', width: 15 },
+    { header: 'EMI Amount', key: 'emi_amount', width: 15 },
+    { header: 'Start Date', key: 'start_date', width: 15 },
+    { header: 'Outstanding', key: 'outstanding', width: 15 },
+    { header: 'EMIs Paid', key: 'paid_emis', width: 12 },
+    { header: 'Notes', key: 'notes', width: 30 }
+  ];
+  
+  const headerRow = worksheet.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+  
+  worksheet.addRow({
+    lender_name: 'HDFC Bank',
+    loan_account_number: 'LN123456789',
+    truck_number: 'MH12AB1234',
+    principal_amount: 1500000,
+    interest_rate: 9.5,
+    tenure_months: 60,
+    emi_amount: 31500,
+    start_date: '01/01/2024',
+    outstanding: 1200000,
+    paid_emis: 12,
+    notes: 'Truck finance'
+  });
+
+  worksheet.addRow({
+    lender_name: 'Shriram Finance',
+    loan_account_number: 'SF987654321',
+    truck_number: 'MH14CD5678',
+    principal_amount: 2000000,
+    interest_rate: 11,
+    tenure_months: 48,
+    emi_amount: 52000,
+    start_date: '15/06/2023',
+    outstanding: 1600000,
+    paid_emis: 8,
+    notes: 'Vehicle loan'
+  });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=loan_import_template.xlsx');
+  
+  workbook.xlsx.write(res);
 });
 
 export default router;
