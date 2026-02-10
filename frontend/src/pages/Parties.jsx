@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, BookOpen, X, Users, TrendingUp, TrendingDown, Search, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, BookOpen, X, Users, TrendingUp, TrendingDown, Search, Trash2, AlertTriangle, FileSpreadsheet, Sparkles } from 'lucide-react';
 import { toast } from 'react-toastify';
 import api from '../services/api';
+import SmartExcelImport from '../components/SmartExcelImport';
 
 export default function Parties() {
   const [parties, setParties] = useState([]);
@@ -20,6 +21,7 @@ export default function Parties() {
   const [deleting, setDeleting] = useState(false);
   const [showEditLedger, setShowEditLedger] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editLedgerForm, setEditLedgerForm] = useState({
     date: '',
     amount: '',
@@ -194,13 +196,22 @@ export default function Parties() {
           <h1 className="text-3xl font-bold text-slate-900">Parties / Customers</h1>
           <p className="text-slate-500 mt-1">Manage your business partners and customers</p>
         </div>
-        <button
-          onClick={() => { setShowModal(true); setSelectedParty(null); setFormData({ name: '', company_name: '', phone: '', email: '', address: '', gstin: '', pan: '', bank_details: '', opening_balance: 0 }); }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-xl font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/40 transition-all"
-        >
-          <Plus size={20} />
-          Add Party
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-violet-300 text-violet-600 rounded-xl font-medium hover:bg-violet-50 transition-all"
+          >
+            <Sparkles size={18} />
+            Smart Import
+          </button>
+          <button
+            onClick={() => { setShowModal(true); setSelectedParty(null); setFormData({ name: '', company_name: '', phone: '', email: '', address: '', gstin: '', pan: '', bank_details: '', opening_balance: 0 }); }}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-500 to-violet-600 text-white rounded-xl font-semibold shadow-lg shadow-violet-500/30 hover:shadow-violet-500/40 transition-all"
+          >
+            <Plus size={20} />
+            Add Party
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -619,6 +630,18 @@ export default function Parties() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Smart Excel Import Modal */}
+      {showImportModal && (
+        <SmartExcelImport
+          onClose={() => setShowImportModal(false)}
+          onImportComplete={(results) => {
+            setShowImportModal(false);
+            fetchParties();
+            toast.success(`Successfully imported ${results.success} ledger entries`);
+          }}
+        />
       )}
     </div>
   );
